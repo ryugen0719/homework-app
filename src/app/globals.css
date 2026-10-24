@@ -1,1 +1,41 @@
-:root{color-scheme:light}html,body{min-height:100%;max-width:100%;overflow-x:hidden}*{box-sizing:border-box}body{margin:0;background:#F6F7F9;color:#1F2A44;font-family:Arial,"Noto Sans JP",sans-serif;-webkit-font-smoothing:antialiased}button,input,textarea{font:inherit;color:inherit}button:focus-visible,a:focus-visible,input:focus-visible,textarea:focus-visible{outline:3px solid #5574AB;outline-offset:2px}a{color:inherit}
+:root {
+  color-scheme: light;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+html,
+body {
+  min-height: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: #F6F7F9;
+  color: #1F2A44;
+  font-family: "Yu Gothic UI", "Hiragino Kaku Gothic ProN", "Meiryo", system-ui, sans-serif;
+  font-size: 16px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+textarea:focus-visible {
+  outline: 3px solid #5574AB;
+  outline-offset: 2px;
+}
+
+a { color: inherit; }

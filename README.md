@@ -1,6 +1,6 @@
 # 宿題ノート
 
-先生と生徒が1対1で使う、宿題登録・提出確認アプリです。日付は日本時間で扱い、全画面を noindex にしています。写真提出はありません。
+先生と生徒が1対1で使う、宿題登録・提出確認アプリです。1日に複数の宿題を登録し、生徒は課題ごとに完了を記録できます。証拠画像は非公開の Vercel Blob に保存し、認証済みの先生・生徒だけが閲覧できます。日付は日本時間で扱い、全画面を noindex にしています。
 
 ## セットアップ手順
 
@@ -29,7 +29,10 @@ Firebase の準備、ローカル起動、動作確認、Vercel 公開までの�
    FIREBASE_PROJECT_ID=FirebaseのプロジェクトID
    FIREBASE_CLIENT_EMAIL=サービスアカウントのメールアドレス
    FIREBASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
+   BLOB_READ_WRITE_TOKEN=Vercel_Blobの読み書きトークン
    ```
+
+   画像提出を使うには、Vercel Storage で **Private** の Blob ストアを作成してこのプロジェクトに接続し、`BLOB_READ_WRITE_TOKEN` をローカルと Vercel の各環境に設定します。証拠画像は JPEG、PNG、WebP、1枚5MBまでです。
 
 5. トークンはそれぞれ別の長いランダム値にします。PowerShell で作る場合は `node -e "console.log(require('node:crypto').randomBytes(32).toString('base64url'))"` を2回実行します。先生用 URL は `/t/先生用トークン`、生徒用 URL は `/s/生徒用トークン` です。URL は秘密情報として本人以外に共有しないでください。
 6. `npm run dev` を実行して先生用・生徒用 URL を確認します。公開前に値を Vercel の Project Settings → Environment Variables に登録します。
@@ -37,4 +40,4 @@ Firebase の準備、ローカル起動、動作確認、Vercel 公開までの�
 
 ## 現在の実装範囲
 
-宿題登録、完了、履歴カレンダー、確認スタンプ、トークン照合 API、Firestore の日付単位保存、PWA マニフェストを含みます。写真提出はありません。
+複数の宿題登録、課題ごとの完了チェック、証拠画像の提出、履歴カレンダー、確認スタンプ、トークン照合 API、Firestore の日付単位保存、PWA マニフェストを含みます。
