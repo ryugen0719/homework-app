@@ -707,7 +707,6 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
         </button>
         <button type="button" className={teacherView === 'reports' ? styles.teacherWorkflowActive : ''} aria-pressed={teacherView === 'reports'} onClick={() => {
           setTeacherView('reports');
-          if (unreviewed > 0) navigateTo(pendingReviews[0].date);
         }}>
           <MessageSquare size={17} aria-hidden="true" />提出を確認{unreviewed > 0 && <span>{unreviewed}</span>}
         </button>
