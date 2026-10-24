@@ -1,36 +1,40 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# 宿題ノート
 
-## Getting Started
+先生と生徒が1対1で使う、宿題登録・提出確認アプリです。日付は日本時間で扱い、全画面を noindex にしています。写真提出はありません。
 
-First, run the development server:
+## セットアップ手順
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+Firebase の準備、ローカル起動、動作確認、Vercel 公開までの詳しい手順は [docs/はじめ方.md](docs/はじめ方.md) を参照してください。
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Firebase と Vercel の概要
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+1. Firebase Console でプロジェクトを作り、Firestore Database を有効にします。Firestore は本番モードで開始します。
+2. Firestore の「ルール」に次を設定して公開クライアントの読み書きを拒否します。Admin SDK はこのルールを迂回し、サーバー API から操作します。
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+   ```text
+   rules_version = '2';
+   service cloud.firestore {
+     match /databases/{database}/documents {
+       match /{document=**} { allow read, write: if false; }
+     }
+   }
+   ```
 
-## Learn More
+3. Firebase のプロジェクト設定からプロジェクト ID を控え、サービスアカウントを作成します。秘密鍵は他人に共有せず、`.env.local` にだけ保存します。
+4. プロジェクト直下に `.env.local` を作り、次の値を設定します。秘密鍵内の改行は `\n` として記述します。
 
-To learn more about Next.js, take a look at the following resources:
+   ```env
+   TEACHER_TOKEN=ここに先生用ランダム文字列
+   STUDENT_TOKEN=ここに生徒用ランダム文字列
+   FIREBASE_PROJECT_ID=FirebaseのプロジェクトID
+   FIREBASE_CLIENT_EMAIL=サービスアカウントのメールアドレス
+   FIREBASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
+   ```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+5. トークンはそれぞれ別の長いランダム値にします。PowerShell で作る場合は `node -e "console.log(require('node:crypto').randomBytes(32).toString('base64url'))"` を2回実行します。先生用 URL は `/t/先生用トークン`、生徒用 URL は `/s/生徒用トークン` です。URL は秘密情報として本人以外に共有しないでください。
+6. `npm run dev` を実行して先生用・生徒用 URL を確認します。公開前に値を Vercel の Project Settings → Environment Variables に登録します。
+7. GitHub に push し、Vercel でリポジトリを Import して Deploy します。環境変数を変更した場合は再デプロイします。
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## 現在の実装範囲
 
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+宿題登録、完了、履歴カレンダー、確認スタンプ、トークン照合 API、Firestore の日付単位保存、PWA マニフェストを含みます。写真提出はありません。
