@@ -701,17 +701,6 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
         </div>}
       </section>
 
-      {role === '先生' && <nav className={styles.teacherWorkflowNav} aria-label="先生用メニュー">
-        <button type="button" className={teacherView === 'homework' ? styles.teacherWorkflowActive : ''} aria-pressed={teacherView === 'homework'} onClick={() => setTeacherView('homework')}>
-          <ClipboardList size={17} aria-hidden="true" />宿題を設定
-        </button>
-        <button type="button" className={teacherView === 'reports' ? styles.teacherWorkflowActive : ''} aria-pressed={teacherView === 'reports'} onClick={() => {
-          setTeacherView('reports');
-        }}>
-          <MessageSquare size={17} aria-hidden="true" />提出を確認{unreviewed > 0 && <span>{unreviewed}</span>}
-        </button>
-      </nav>}
-
       <div className={styles.carouselWrap}>
         {dayIndex > 0 && <button className={[styles.arrow, styles.arrowLeft].join(' ')} aria-label="前の日" onClick={() => navigateTo(days[dayIndex - 1])}><ChevronLeft size={20} aria-hidden="true" /></button>}
         <div className={styles.carousel} ref={carouselRef} onScroll={handleScroll} aria-label="日別カード">
@@ -745,6 +734,15 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
                       {role === '先生' && <span className={cardStatusClass}>{statusFor(saved)}</span>}
                     </div>
                   </div>
+
+                  {role === '先生' && date === day && <nav className={styles.teacherWorkflowNav} aria-label="先生用メニュー">
+                    <button type="button" className={teacherView === 'homework' ? styles.teacherWorkflowActive : ''} aria-pressed={teacherView === 'homework'} onClick={() => setTeacherView('homework')}>
+                      <ClipboardList size={17} aria-hidden="true" />宿題を設定
+                    </button>
+                    <button type="button" className={teacherView === 'reports' ? styles.teacherWorkflowActive : ''} aria-pressed={teacherView === 'reports'} onClick={() => setTeacherView('reports')}>
+                      <MessageSquare size={17} aria-hidden="true" />提出を確認{unreviewed > 0 && <span>{unreviewed}</span>}
+                    </button>
+                  </nav>}
 
                   {role === '生徒' ? (
                     <>
