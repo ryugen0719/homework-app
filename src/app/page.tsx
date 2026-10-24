@@ -219,6 +219,7 @@ function StudentTaskRow({
 
 export default function Home({ initialRole = '生徒', accessToken = '' }: { initialRole?: '生徒' | '先生'; accessToken?: string }) {
   const [role] = useState<'生徒' | '先生'>(initialRole);
+  const [teacherView, setTeacherView] = useState<'homework' | 'reports'>('homework');
   const today = useSyncExternalStore(subscribeToToday, todayJst, () => '');
   const [selectedDay, setSelectedDay] = useState('');
   const day = selectedDay || today;
@@ -645,7 +646,7 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
         <div className={styles.teacherHeaderStats} aria-label="宿題の状況">
           <div className={styles.teacherMetric}><span>登録済み</span><strong>{assignedHomeworkCount}件</strong></div>
           {unreviewed > 0
-            ? <button className={styles.teacherPendingMetric} onClick={() => navigateTo(pendingReviews[0].date)} aria-label={`確認待ち${unreviewed}件を確認`}>
+            ? <button className={styles.teacherPendingMetric} onClick={() => { setTeacherView('reports'); navigateTo(pendingReviews[0].date); }} aria-label={`確認待ち${unreviewed}件を確認`}>
                 <span>確認待ち</span><strong>{unreviewed}件</strong><ChevronRight size={16} aria-hidden="true" />
               </button>
             : <div className={styles.teacherMetric}><span>確認待ち</span><strong>0件</strong></div>}
@@ -699,6 +700,18 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
           <span><i className={[styles.legendMarker, styles.legendDone].join(' ')} aria-hidden="true"><Check size={12} /></i>完了</span>
         </div>}
       </section>
+
+      {role === '先生' && <nav className={styles.teacherWorkflowNav} aria-label="先生用メニュー">
+        <button type="button" className={teacherView === 'homework' ? styles.teacherWorkflowActive : ''} aria-pressed={teacherView === 'homework'} onClick={() => setTeacherView('homework')}>
+          <ClipboardList size={17} aria-hidden="true" />宿題を設定
+        </button>
+        <button type="button" className={teacherView === 'reports' ? styles.teacherWorkflowActive : ''} aria-pressed={teacherView === 'reports'} onClick={() => {
+          setTeacherView('reports');
+          if (unreviewed > 0) navigateTo(pendingReviews[0].date);
+        }}>
+          <MessageSquare size={17} aria-hidden="true" />提出を確認{unreviewed > 0 && <span>{unreviewed}</span>}
+        </button>
+      </nav>}
 
       <div className={styles.carouselWrap}>
         {dayIndex > 0 && <button className={[styles.arrow, styles.arrowLeft].join(' ')} aria-label="前の日" onClick={() => navigateTo(days[dayIndex - 1])}><ChevronLeft size={20} aria-hidden="true" /></button>}
@@ -773,7 +786,7 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
                         </div>
                       </section>}
                     </>
-                  ) : (
+                  ) : teacherView === 'homework' ? (
                     <>
                       <section className={`${styles.homeworkLabel} ${styles.teacherHomeworkLabel}`}>
                         <h3 className={styles.teacherSectionTitle}><ClipboardList size={17} aria-hidden="true" />宿題の設定</h3>
@@ -804,7 +817,9 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
                           </div>
                           : itemTasks.length === 0 && <p className={styles.emptyHomework}>宿題はありません</p>}
                       </section>
-                      {(saved?.done || itemTasks.some((task) => task.evidencePath)) && <section className={styles.report}>
+                    </>
+                  ) : (saved?.done || itemTasks.some((task) => task.evidencePath)) ? (
+                    <section className={styles.report}>
                         <h2 className={styles.teacherSectionTitle}><MessageSquare size={17} aria-hidden="true" />生徒の報告</h2>
                         {saved?.doneAt && <p>{formatDateTime(saved.doneAt)}に完了</p>}
                         {saved?.reviewedAt && <p className={styles.reviewedMessage}>確認済み</p>}
@@ -830,9 +845,8 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
                             {saving ? '保存しています' : savedEntry?.reviewedAt ? '確認内容を保存' : '確認する'}
                           </button>
                         </div>}
-                      </section>}
-                    </>
-                  )}
+                    </section>
+                  ) : <div className={styles.teacherReportEmpty}><MessageSquare size={20} aria-hidden="true" /><span>この日の提出はありません</span></div>}
                 </article>
               );
             })}
@@ -846,7 +860,7 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
       {error && <p role="alert" className={styles.error}>{error}</p>}
       {!error && savedMessage && <p role="status" className={styles.successMessage}>{savedMessage}</p>}
 
-      {role === '先生' && <section className={styles.bottomDock} aria-label="宿題設定の操作">
+      {role === '先生' && teacherView === 'homework' && <section className={styles.bottomDock} aria-label="宿題設定の操作">
             <div className={styles.teacherActions}>
               <button className={styles.primaryAction} disabled={saving || !entryReady || !entryIsDirty || !entryTaskReady} onClick={() => void saveEntry({ ...entry, text: entryTaskText, tasks: entryTasks, isRestDay: false })}>{saving ? '保存しています' : '保存'}</button>
               {entry.isRestDay
