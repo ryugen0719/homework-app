@@ -100,7 +100,7 @@ function statusFor(entry?: Entry) {
   return '未完了';
 }
 
-function EvidencePreview({ pathname, token }: { pathname: string; token: string }) {
+function EvidencePreview({ pathname, token, taskName }: { pathname: string; token: string; taskName: string }) {
   const [image, setImage] = useState<{ pathname: string; source?: string; failed?: boolean }>();
   const [expanded, setExpanded] = useState(false);
   const [zoomed, setZoomed] = useState(false);
@@ -144,14 +144,14 @@ function EvidencePreview({ pathname, token }: { pathname: string; token: string 
   if (!image.source) return <span className={styles.evidenceLoading}>画像を読み込んでいます</span>;
   // Private images are fetched with the app token and displayed from a temporary object URL.
   return <>
-    <button type="button" className={styles.evidenceThumbnailButton} aria-label="提出写真を拡大表示" onClick={() => { setZoomed(false); setExpanded(true); }}>
+    <button type="button" className={styles.evidenceThumbnailButton} aria-label={`${taskName}の提出写真を拡大表示`} onClick={() => { setZoomed(false); setExpanded(true); }}>
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img className={styles.evidenceThumbnail} src={image.source} alt="提出された宿題の証拠画像" />
+      <img className={styles.evidenceThumbnail} src={image.source} alt={`${taskName}の提出写真`} />
     </button>
     <dialog
       ref={dialogRef}
       className={styles.evidenceDialog}
-      aria-label="提出写真"
+      aria-label={`${taskName}の提出写真`}
       onClose={() => { setExpanded(false); setZoomed(false); }}
       onClick={(event) => { if (event.target === event.currentTarget) setExpanded(false); }}
     >
@@ -162,7 +162,7 @@ function EvidencePreview({ pathname, token }: { pathname: string; token: string 
       </div>
       <div className={styles.evidenceDialogImageViewport}>
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img className={zoomed ? `${styles.evidenceDialogImage} ${styles.evidenceDialogImageZoomed}` : styles.evidenceDialogImage} src={image.source} alt="提出された宿題の証拠画像" />
+        <img className={zoomed ? `${styles.evidenceDialogImage} ${styles.evidenceDialogImageZoomed}` : styles.evidenceDialogImage} src={image.source} alt={`${taskName}の提出写真`} />
       </div>
     </dialog>
   </>;
@@ -195,7 +195,7 @@ function StudentTaskRow({
         <span>{task.text}</span>
       </label>
       <div className={styles.taskEvidence}>
-        {task.evidencePath && <EvidencePreview pathname={task.evidencePath} token={token} />}
+        {task.evidencePath && <EvidencePreview pathname={task.evidencePath} token={token} taskName={task.text} />}
         <button type="button" className={styles.evidenceButton} disabled={disabled || uploading} onClick={() => inputRef.current?.click()}>
           {uploading ? `送信中 ${uploadProgress}%` : <><Camera size={16} aria-hidden="true" />{task.evidencePath ? '写真を変更' : '写真を追加'}</>}
         </button>
@@ -825,7 +825,7 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
                           <ul className={styles.teacherEvidenceList}>
                             {itemTasks.filter((task) => task.evidencePath).map((task) => <li key={task.id}>
                               <span>{task.text}</span>
-                              {task.evidencePath && <EvidencePreview pathname={task.evidencePath} token={token} />}
+                              {task.evidencePath && <EvidencePreview pathname={task.evidencePath} token={token} taskName={task.text} />}
                             </li>)}
                           </ul>
                         </div>}
