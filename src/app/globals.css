@@ -1,32 +1,223 @@
+@import url("https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@700;800&family=Noto+Sans+JP:wght@400;500&family=Nunito:wght@800&display=swap");
 @import 'tailwindcss';
 
-@theme {
-  --color-canvas: #fff8ec;
-  --color-ink: #38344f;
-  --color-muted: #706b7d;
-  --color-paper: #fffefb;
-  --color-line: #f0dfca;
-  --color-surface: #fffefb;
-  --color-coral: #c84d42;
-  --color-coral-soft: #ffe4dc;
-  --color-coral-ink: #96372f;
-  --color-teal: #2b8175;
-  --color-teal-soft: #def3e7;
-  --color-teal-ink: #176257;
-  --color-sky: #e4f0ff;
-  --color-sky-ink: #426c9a;
-  --color-sunshine: #fff0bf;
-  --color-sunshine-ink: #76570d;
-  --color-lavender: #efe6ff;
-  --color-alert: #ffeaed;
-  --color-alert-ink: #9c3546;
+:root,
+html[data-theme="light"] {
+  color-scheme: light;
+  /* 1. 背景（生成り）: ページ全体 */
+  --bg: #F6F1E7;
+  /* 2. カード（黄みの白）: カード、入力欄 */
+  --card: #FFFDF8;
+  /* 3. 線（ベージュ）: カードの枠、区切り線 */
+  --line: #E2D9C8;
+  /* 4. 文字（墨）: 見出し、本文 */
+  --text: #1E2A3A;
+  /* 5. サブ文字（暖かいグレー）: ラベル、説明、曜日 */
+  --text-sub: #7A766C;
+  --text-faint: #7A766C;
+
+  /* 6. メイン（藍）: ボタン、選択中、数字の強調 */
+  --indigo: #2E4A7D;
+  --indigo-soft: #E4E9F2;
+  --indigo-ink: #2E4A7D;
+  --on-indigo: #FFFFFF;
+
+  /* 7. 記録あり・ごほうび（朱）: 赤丸、「よくできました」 */
+  --vermilion: #C8402B;
+  --vermilion-soft: #F9E3DC;
+  --vermilion-dark: #9B2F1C;
+  --on-vermilion: #FFFFFF;
+
+  /* 8. マーカー（山吹）: 数字の下線だけ（1画面に1〜2か所） */
+  --yamabuki: #F4D35E;
+  --yamabuki-soft: #FBF0C4;
+  --yamabuki-ink: #1E2A3A;
+
+  /* セマンティックエイリアス */
+  --border: var(--line);
+  --primary: var(--indigo);
+  --primary-soft: var(--indigo-soft);
+  --primary-ink: var(--indigo-ink);
+  --on-primary: var(--on-indigo);
+  --primary-hover: color-mix(in srgb, var(--indigo), #000000 12%);
+  --primary-dark: color-mix(in srgb, var(--indigo), var(--text) 24%);
+  --on-ink: var(--on-indigo);
+
+  --secondary: var(--indigo);
+  --secondary-soft: var(--indigo-soft);
+  --secondary-ink: var(--indigo-ink);
+
+  --reward: var(--vermilion);
+  --reward-soft: var(--vermilion-soft);
+  --reward-ink: var(--vermilion-dark);
+  --reward-line: color-mix(in srgb, var(--vermilion), #FFFFFF 65%);
+  --on-reward: var(--on-vermilion);
+
+  --accent: var(--yamabuki);
+  --accent-soft: var(--yamabuki-soft);
+  --accent-ink: var(--yamabuki-ink);
+
+  /* 互換用セマンティックトークン */
+  --success: var(--vermilion);
+  --success-soft: var(--vermilion-soft);
+  --success-ink: var(--vermilion-dark);
+  --success-line: var(--reward-line);
+  --error: var(--vermilion);
+  --error-soft: var(--vermilion-soft);
+  --error-ink: var(--vermilion-dark);
+
+  --space-1: 8px;
+  --space-2: 16px;
+  --space-3: 24px;
+  --space-4: 32px;
+  --radius-s: 12px;
+  --radius-m: 16px;
+  --radius-full: 999px;
+  --shadow-card: none;
+  --shadow-pop: 0 4px 0 var(--primary-dark);
 }
 
-:root {
-  color-scheme: light;
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    /* 1. 背景: #1B1C22 */
+    --bg: #1B1C22;
+    /* 2. カード: #25262E */
+    --card: #25262E;
+    /* 3. 線: #363741 */
+    --line: #363741;
+    /* 4. 文字: #EFEBE2 */
+    --text: #EFEBE2;
+    /* 5. サブ文字: #A09C92 */
+    --text-sub: #A09C92;
+    --text-faint: #A09C92;
+
+    /* 6. メイン（藍ダーク: #8FA8D8） */
+    --indigo: #8FA8D8;
+    --indigo-soft: #232C3D;
+    --indigo-ink: #8FA8D8;
+    --on-indigo: #121A28;
+
+    /* 7. 記録あり・ごほうび（朱ダーク: #E8725A） */
+    --vermilion: #E8725A;
+    --vermilion-soft: #3D221E;
+    --vermilion-dark: #FFB3A3;
+    --on-vermilion: #2A100C;
+
+    /* 8. マーカー（山吹ダーク: #F2D060） */
+    --yamabuki: #F2D060;
+    --yamabuki-soft: #38311B;
+    --yamabuki-ink: #EFEBE2;
+
+    --border: var(--line);
+    --primary: var(--indigo);
+    --primary-soft: var(--indigo-soft);
+    --primary-ink: var(--indigo-ink);
+    --on-primary: var(--on-indigo);
+    --reward: var(--vermilion);
+    --reward-soft: var(--vermilion-soft);
+    --reward-ink: var(--vermilion-dark);
+    --on-reward: var(--on-vermilion);
+    --accent: var(--yamabuki);
+    --accent-soft: var(--yamabuki-soft);
+    --accent-ink: var(--yamabuki-ink);
+    --primary-hover: #A5BAE2;
+    --primary-dark: #647B9F;
+  }
 }
+
+html[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #1B1C22;
+  --card: #25262E;
+  --line: #363741;
+  --text: #EFEBE2;
+  --text-sub: #A09C92;
+  --text-faint: #A09C92;
+  --indigo: #8FA8D8;
+  --indigo-soft: #232C3D;
+  --indigo-ink: #8FA8D8;
+  --on-indigo: #121A28;
+  --vermilion: #E8725A;
+  --vermilion-soft: #3D221E;
+  --vermilion-dark: #FFB3A3;
+  --on-vermilion: #2A100C;
+  --yamabuki: #F2D060;
+  --yamabuki-soft: #38311B;
+  --yamabuki-ink: #EFEBE2;
+  --border: var(--line);
+  --primary: var(--indigo);
+  --primary-soft: var(--indigo-soft);
+  --primary-ink: var(--indigo-ink);
+  --on-primary: var(--on-indigo);
+  --reward: var(--vermilion);
+  --reward-soft: var(--vermilion-soft);
+  --reward-ink: var(--vermilion-dark);
+  --on-reward: var(--on-vermilion);
+  --accent: var(--yamabuki);
+  --accent-soft: var(--yamabuki-soft);
+  --accent-ink: var(--yamabuki-ink);
+  --primary-hover: #A5BAE2;
+  --primary-dark: #647B9F;
+}
+
+
+@theme inline {
+  --spacing: calc(var(--space-1) / 2);
+  --color-canvas: var(--bg);
+  --color-ink: var(--text);
+  --color-muted: var(--text-sub);
+  --color-muted-soft: var(--text-faint);
+  --color-paper: var(--card);
+  --color-line: var(--border);
+
+  --color-primary: var(--primary);
+  --color-primary-soft: var(--primary-soft);
+  --color-primary-ink: var(--primary-ink);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-dark: var(--primary-dark);
+
+  --color-reward: var(--reward);
+  --color-reward-soft: var(--reward-soft);
+  --color-reward-ink: var(--reward-ink);
+
+  --color-marker: var(--accent);
+  --color-marker-soft: var(--accent-soft);
+  --color-marker-ink: var(--accent-ink);
+
+  --color-indigo: var(--indigo);
+  --color-indigo-soft: var(--indigo-soft);
+  --color-indigo-ink: var(--indigo-ink);
+
+  --color-vermilion: var(--vermilion);
+  --color-vermilion-soft: var(--vermilion-soft);
+  --color-vermilion-ink: var(--vermilion-dark);
+
+  --color-yamabuki: var(--yamabuki);
+  --color-yamabuki-soft: var(--yamabuki-soft);
+  --color-yamabuki-ink: var(--yamabuki-ink);
+
+  /* 既存クラス名との互換定義 */
+  --color-teal: var(--indigo);
+  --color-teal-soft: var(--indigo-soft);
+  --color-teal-ink: var(--indigo-ink);
+  --color-sunshine: var(--vermilion-soft);
+  --color-sunshine-soft: var(--yamabuki-soft);
+  --color-sunshine-ink: var(--vermilion-dark);
+  --color-success: var(--vermilion);
+  --color-success-soft: var(--vermilion-soft);
+  --color-success-ink: var(--vermilion-dark);
+  --color-success-line: var(--reward-line);
+  --color-coral: var(--vermilion);
+  --color-coral-soft: var(--vermilion-soft);
+  --color-coral-ink: var(--vermilion-dark);
+
+  --font-body: "Noto Sans JP", sans-serif;
+  --font-rounded: "M PLUS Rounded 1c", "Noto Sans JP", sans-serif;
+  --font-numbers: "Nunito", "M PLUS Rounded 1c", sans-serif;
+}
+
+* { box-sizing: border-box; }
 
 html,
 body {
@@ -35,16 +226,27 @@ body {
   overflow-x: hidden;
 }
 
-* { box-sizing: border-box; }
-
 body {
   margin: 0;
-  background: var(--color-canvas);
-  color: var(--color-ink);
-  font-family: "Yu Gothic UI", "Hiragino Kaku Gothic ProN", Meiryo, system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  font-family: "Noto Sans JP", sans-serif;
   font-size: 16px;
-  line-height: 1.6;
+  line-height: 1.7;
   -webkit-font-smoothing: antialiased;
+}
+
+h1,
+h2,
+button {
+  font-family: "M PLUS Rounded 1c", "Noto Sans JP", sans-serif;
+  font-weight: 700;
+}
+
+.score,
+.level {
+  font-family: "Nunito", "M PLUS Rounded 1c", sans-serif;
+  font-weight: 800;
 }
 
 button,
@@ -58,8 +260,71 @@ button:focus-visible,
 a:focus-visible,
 input:focus-visible,
 textarea:focus-visible {
-  outline: 3px solid var(--color-coral);
+  outline: 3px solid var(--secondary);
   outline-offset: 2px;
 }
 
 a { color: inherit; }
+
+@keyframes record-complete {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.05); }
+}
+
+.record-complete { animation: record-complete 240ms ease-out; }
+
+.highlight-mark { background: linear-gradient(transparent 60%, var(--yamabuki) 60%); color: var(--text); }
+.session-minutes { align-self: start; border-radius: var(--radius-full); background: var(--indigo-soft); color: var(--indigo-ink); padding: 4px 12px; font: 800 16px/1.5 "Nunito", sans-serif; white-space: nowrap; }
+.day-has-record-indicator { display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: var(--vermilion); color: #FFFFFF; }
+.day-no-record-indicator { color: var(--text-sub); }
+.session-check { color: var(--vermilion); margin-top: 3px; }
+.teacher-record-heading { align-items: center; }
+.shell > header { margin-bottom: 32px; }
+.shell > header .brand p { color: var(--text-sub); font-size: 14px; font-weight: 700; }
+.shell > header [aria-label="週を選ぶ"] > div { align-items: center; }
+.shell > header [aria-label="週を選ぶ"] > div > span { display: none; }
+.shell > section:has(> h1) { align-items: flex-start; text-align: left; }
+.shell > section:has(> h1) h1 { font-size: 28px; font-weight: 800; }
+.shell > section:has(> h1) .weekSummary { margin-top: 24px; }
+.shell > section:has(> h1) .weekSummary strong { font-size: 40px; }
+.shell > section:has(> h1) .weekSummary > span { min-width: 140px; padding: 0 24px 0 0; }
+.shell > section:has(> h1) .weekSummary > span + span { padding-left: 24px; }
+.shell [role="group"][aria-label="記録の日付"] { border-top: 1px solid var(--border); }
+.shell [role="group"][aria-label="記録の日付"] > button { min-height: 72px; height: 72px; border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); border-radius: 0; gap: 4px; }
+.shell [role="group"][aria-label="記録の日付"] > button:last-child { border-right: 0; }
+.shell [role="group"][aria-label="記録の日付"] > button[aria-pressed="true"] { background: var(--primary); color: var(--on-primary); }
+.shell [role="group"][aria-label="記録の日付"] > button[aria-pressed="true"] > span,
+.shell [role="group"][aria-label="記録の日付"] > button[aria-pressed="true"] > strong,
+.shell [role="group"][aria-label="記録の日付"] > button[aria-pressed="true"] > small { color: var(--on-primary); }
+.shell [role="group"][aria-label="記録の日付"] > button[aria-pressed="true"] .day-has-record-indicator { color: var(--vermilion); background: #FFFFFF; }
+.shell [role="group"][aria-label="記録の日付"] > button.future-day { opacity: .52; }
+.shell .teacher-record-heading { margin-bottom: 8px; }
+.shell .teacher-record-heading h2 { font-size: 18px; font-weight: 700; }
+.shell .teacher-record-heading .count { font: 800 20px/1.4 "Nunito", sans-serif; color: var(--text); }
+.shell .teacher-session { grid-template-columns: 24px minmax(0,1fr) auto; align-items: start; gap: 12px; }
+.shell .teacher-session .sessionBody > p { margin: 0; }
+.shell .stamps > button { box-shadow: 0 3px 0 var(--border); transition: transform .2s ease, box-shadow .2s ease, background .2s ease; }
+.shell .stamps > button:active { transform: translateY(2px) scale(1.02); box-shadow: none; }
+.shell .stamps > button[aria-pressed="true"] { background: var(--primary); color: var(--on-primary); border-color: var(--primary); }
+.shell .stamps > button.stamp-great { border-color: var(--vermilion); background: var(--vermilion-soft); color: var(--vermilion-dark); }
+.shell .stamps > button.stamp-great[aria-pressed="true"] { background: var(--vermilion); color: var(--on-vermilion); border-color: var(--vermilion); }
+.shell [role="group"][aria-label="記録の日付"] > button[aria-pressed="true"],
+.shell .stamps > button[aria-pressed="true"] { animation: record-complete 200ms ease-out; }
+.shell .primaryButton { box-shadow: 0 4px 0 var(--primary-dark); background-color: var(--primary); color: var(--on-primary); }
+.shell :focus-visible { outline: 3px solid var(--primary); outline-offset: 3px; }
+.shell .dayScrollHint { text-align: left; }
+@media (max-width: 700px) {
+  .shell > header { margin-bottom: 24px; }
+  .shell [role="group"][aria-label="記録の日付"] > button { min-width: 48px; }
+  .shell .teacher-session { grid-template-columns: 24px minmax(0,1fr) auto; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+}
