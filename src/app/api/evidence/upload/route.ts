@@ -1,6 +1,6 @@
 import { handleUpload, type HandleUploadBody } from '@vercel/blob/client';
 import { NextResponse } from 'next/server';
-import { authorize, database, isStudentDate, parseEvidencePath, tasksFromEntry } from '../../../../lib/homework-server';
+import { authorize, database, isStudentDate, parseEvidencePath, sessionsFromDay } from '../../../../lib/homework-server';
 
 const MAX_IMAGE_SIZE = 5 * 1024 * 1024;
 
@@ -20,17 +20,17 @@ export async function POST(request: Request) {
       onBeforeGenerateToken: async (pathname, clientPayload) => {
         if (authorize(request) !== 'student' || !clientPayload) throw new Error('Upload not allowed');
         const requested = parseEvidencePath(pathname);
-        let payload: { date?: unknown; taskId?: unknown };
+        let payload: { date?: unknown; sessionId?: unknown };
         try {
-          payload = JSON.parse(clientPayload) as { date?: unknown; taskId?: unknown };
+          payload = JSON.parse(clientPayload) as { date?: unknown; sessionId?: unknown };
         } catch {
           throw new Error('Upload not allowed');
         }
-        if (!requested || payload.date !== requested.date || payload.taskId !== requested.taskId || !isStudentDate(requested.date)) {
+        if (!requested || payload.date !== requested.date || payload.sessionId !== requested.sessionId || !isStudentDate(requested.date)) {
           throw new Error('Upload not allowed');
         }
         const snapshot = await database().collection('days').doc(requested.date).get();
-        if (!snapshot.exists || !tasksFromEntry(snapshot.data() || {}).some((task) => task.id === requested.taskId)) {
+        if (!snapshot.exists || !sessionsFromDay(snapshot.data() || {}).some((session) => session.id === requested.sessionId)) {
           throw new Error('Upload not allowed');
         }
         return {

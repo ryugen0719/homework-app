@@ -1,3 +1,27 @@
+@import 'tailwindcss';
+
+@theme {
+  --color-canvas: #fff8ec;
+  --color-ink: #38344f;
+  --color-muted: #706b7d;
+  --color-paper: #fffefb;
+  --color-line: #f0dfca;
+  --color-surface: #fffefb;
+  --color-coral: #c84d42;
+  --color-coral-soft: #ffe4dc;
+  --color-coral-ink: #96372f;
+  --color-teal: #2b8175;
+  --color-teal-soft: #def3e7;
+  --color-teal-ink: #176257;
+  --color-sky: #e4f0ff;
+  --color-sky-ink: #426c9a;
+  --color-sunshine: #fff0bf;
+  --color-sunshine-ink: #76570d;
+  --color-lavender: #efe6ff;
+  --color-alert: #ffeaed;
+  --color-alert-ink: #9c3546;
+}
+
 :root {
   color-scheme: light;
   font-synthesis: none;
@@ -15,8 +39,8 @@ body {
 
 body {
   margin: 0;
-  background: #f5f4ee;
-  color: #202c29;
+  background: var(--color-canvas);
+  color: var(--color-ink);
   font-family: "Yu Gothic UI", "Hiragino Kaku Gothic ProN", Meiryo, system-ui, sans-serif;
   font-size: 16px;
   line-height: 1.6;
@@ -34,13 +58,8 @@ button:focus-visible,
 a:focus-visible,
 input:focus-visible,
 textarea:focus-visible {
-  outline: 3px solid #1b6e66;
+  outline: 3px solid var(--color-coral);
   outline-offset: 2px;
 }
 
 a { color: inherit; }
-
-@media (prefers-color-scheme: dark) {
-  :root { color-scheme: dark; }
-  body { background: #17211d; color: #e5ece7; }
-}

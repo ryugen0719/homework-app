@@ -2,8 +2,7 @@ import { cert, getApps, initializeApp } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
 
 export type AppRole = 'teacher' | 'student';
-export type WeeklyTask = { id: string; text: string };
-export type HomeworkTask = WeeklyTask & { done: boolean; evidencePath?: string; evidenceAt?: string };
+export type StudySession = { id: string; content: string; minutes?: number; evidencePath?: string; createdAt?: string; updatedAt?: string };
 
 export function authorize(request: Request): AppRole | null {
   const token = request.headers.get('x-app-token');
@@ -39,38 +38,21 @@ export function validDate(date: unknown): date is string {
   const value = new Date(Date.UTC(year, month - 1, day));
   return value.getUTCFullYear() === year && value.getUTCMonth() === month - 1 && value.getUTCDate() === day;
 }
-export function tasksFromWeek(value: Record<string, unknown>): WeeklyTask[] {
-  if (!Array.isArray(value.tasks)) return [];
-  return value.tasks.flatMap((item) => {
-    if (!item || typeof item !== 'object') return [];
-    const task = item as Record<string, unknown>;
-    if (typeof task.id !== 'string' || typeof task.text !== 'string' || !task.text.trim()) return [];
-    return [{ id: task.id, text: task.text }];
-  });
-}
-
-export function tasksFromEntry(entry: Record<string, unknown>): HomeworkTask[] {
-  if (Array.isArray(entry.tasks)) {
-    return entry.tasks.flatMap((value) => {
-      if (!value || typeof value !== 'object') return [];
-      const task = value as Record<string, unknown>;
-      if (typeof task.id !== 'string' || typeof task.text !== 'string' || !task.text.trim()) return [];
-      return [{
-        id: task.id,
-        text: task.text,
-        done: task.done === true,
-        ...(typeof task.evidencePath === 'string' ? { evidencePath: task.evidencePath } : {}),
-        ...(typeof task.evidenceAt === 'string' ? { evidenceAt: task.evidenceAt } : {}),
-      }];
-    });
-  }
-  if (typeof entry.text === 'string' && entry.text.trim()) {
+export function sessionsFromDay(day: Record<string, unknown>): StudySession[] {
+  if (!Array.isArray(day.sessions)) return [];
+  return day.sessions.flatMap((value) => {
+    if (!value || typeof value !== 'object') return [];
+    const session = value as Record<string, unknown>;
+    if (typeof session.id !== 'string' || !/^[a-f0-9-]{36}$/i.test(session.id) || typeof session.content !== 'string' || !session.content.trim()) return [];
     return [{
-      id: 'legacy', text: entry.text, done: entry.done === true,
-      ...(typeof entry.evidencePath === 'string' ? { evidencePath: entry.evidencePath } : {}),
+      id: session.id,
+      content: session.content,
+      ...(Number.isInteger(session.minutes) && (session.minutes as number) > 0 && (session.minutes as number) <= 1440 ? { minutes: session.minutes as number } : {}),
+      ...(typeof session.evidencePath === 'string' ? { evidencePath: session.evidencePath } : {}),
+      ...(typeof session.createdAt === 'string' ? { createdAt: session.createdAt } : {}),
+      ...(typeof session.updatedAt === 'string' ? { updatedAt: session.updatedAt } : {}),
     }];
-  }
-  return [];
+  });
 }
 
 export function isStudentDate(date: string) {
@@ -82,14 +64,7 @@ export function isStudentDate(date: string) {
 }
 
 export function parseEvidencePath(pathname: string) {
-  const match = /^evidence\/(\d{4}-\d{2}-\d{2})\/([a-zA-Z0-9_-]{1,64})\/([a-f0-9-]{36}(?:-[a-zA-Z0-9]{1,40})?)\.(jpe?g|png|webp)$/.exec(pathname);
+  const match = /^evidence\/(\d{4}-\d{2}-\d{2})\/([a-f0-9-]{36})\/([a-f0-9-]{36}(?:-[a-zA-Z0-9]{1,40})?)\.(jpe?g|png|webp)$/i.exec(pathname);
   if (!match) return null;
-  return { date: match[1], taskId: match[2] };
-}
-
-export function dayProgress(entry: Record<string, unknown>, taskId: string) {
-  const progress = entry.progress;
-  if (!progress || typeof progress !== 'object') return undefined;
-  const value = (progress as Record<string, unknown>)[taskId];
-  return value && typeof value === 'object' ? value as Record<string, unknown> : undefined;
+  return { date: match[1], sessionId: match[2] };
 }
