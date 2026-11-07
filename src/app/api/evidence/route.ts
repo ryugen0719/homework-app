@@ -1,6 +1,6 @@
 import { get } from '@vercel/blob';
 import { NextRequest, NextResponse } from 'next/server';
-import { authorize, database, parseEvidencePath, tasksFromEntry } from '@/lib/homework-server';
+import { authorize, database, parseEvidencePath, tasksFromEntry } from '../../../lib/homework-server';
 
 export async function GET(request: NextRequest) {
   const role = authorize(request);

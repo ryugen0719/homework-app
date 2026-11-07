@@ -2,14 +2,8 @@ import { cert, getApps, initializeApp } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
 
 export type AppRole = 'teacher' | 'student';
-
-export type HomeworkTask = {
-  id: string;
-  text: string;
-  done: boolean;
-  evidencePath?: string;
-  evidenceAt?: string;
-};
+export type WeeklyTask = { id: string; text: string };
+export type HomeworkTask = WeeklyTask & { done: boolean; evidencePath?: string; evidenceAt?: string };
 
 export function authorize(request: Request): AppRole | null {
   const token = request.headers.get('x-app-token');
@@ -26,6 +20,33 @@ export function database() {
   if (!projectId || !clientEmail || !privateKey) throw new Error('Firebase is not configured');
   const app = getApps()[0] || initializeApp({ credential: cert({ projectId, clientEmail, privateKey }), projectId });
   return getFirestore(app);
+}
+
+export function weekStartFor(date: string) {
+  const value = new Date(`${date}T12:00:00+09:00`);
+  const offset = (value.getDay() + 6) % 7;
+  value.setDate(value.getDate() - offset);
+  return new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Tokyo' }).format(value);
+}
+
+export function validDate(date: unknown): date is string {
+  if (typeof date !== 'string') return false;
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
+  if (!match) return false;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const value = new Date(Date.UTC(year, month - 1, day));
+  return value.getUTCFullYear() === year && value.getUTCMonth() === month - 1 && value.getUTCDate() === day;
+}
+export function tasksFromWeek(value: Record<string, unknown>): WeeklyTask[] {
+  if (!Array.isArray(value.tasks)) return [];
+  return value.tasks.flatMap((item) => {
+    if (!item || typeof item !== 'object') return [];
+    const task = item as Record<string, unknown>;
+    if (typeof task.id !== 'string' || typeof task.text !== 'string' || !task.text.trim()) return [];
+    return [{ id: task.id, text: task.text }];
+  });
 }
 
 export function tasksFromEntry(entry: Record<string, unknown>): HomeworkTask[] {
@@ -45,9 +66,7 @@ export function tasksFromEntry(entry: Record<string, unknown>): HomeworkTask[] {
   }
   if (typeof entry.text === 'string' && entry.text.trim()) {
     return [{
-      id: 'legacy',
-      text: entry.text,
-      done: entry.done === true,
+      id: 'legacy', text: entry.text, done: entry.done === true,
       ...(typeof entry.evidencePath === 'string' ? { evidencePath: entry.evidencePath } : {}),
     }];
   }
@@ -66,4 +85,11 @@ export function parseEvidencePath(pathname: string) {
   const match = /^evidence\/(\d{4}-\d{2}-\d{2})\/([a-zA-Z0-9_-]{1,64})\/([a-f0-9-]{36}(?:-[a-zA-Z0-9]{1,40})?)\.(jpe?g|png|webp)$/.exec(pathname);
   if (!match) return null;
   return { date: match[1], taskId: match[2] };
+}
+
+export function dayProgress(entry: Record<string, unknown>, taskId: string) {
+  const progress = entry.progress;
+  if (!progress || typeof progress !== 'object') return undefined;
+  const value = (progress as Record<string, unknown>)[taskId];
+  return value && typeof value === 'object' ? value as Record<string, unknown> : undefined;
 }

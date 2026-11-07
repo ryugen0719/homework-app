@@ -15,9 +15,9 @@ body {
 
 body {
   margin: 0;
-  background: #F6F7F9;
-  color: #1F2A44;
-  font-family: "Yu Gothic UI", "Hiragino Kaku Gothic ProN", "Meiryo", system-ui, sans-serif;
+  background: #f5f4ee;
+  color: #202c29;
+  font-family: "Yu Gothic UI", "Hiragino Kaku Gothic ProN", Meiryo, system-ui, sans-serif;
   font-size: 16px;
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
@@ -34,8 +34,13 @@ button:focus-visible,
 a:focus-visible,
 input:focus-visible,
 textarea:focus-visible {
-  outline: 3px solid #5574AB;
+  outline: 3px solid #1b6e66;
   outline-offset: 2px;
 }
 
 a { color: inherit; }
+
+@media (prefers-color-scheme: dark) {
+  :root { color-scheme: dark; }
+  body { background: #17211d; color: #e5ece7; }
+}

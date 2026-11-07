@@ -1,6 +1,6 @@
 import { handleUpload, type HandleUploadBody } from '@vercel/blob/client';
 import { NextResponse } from 'next/server';
-import { authorize, database, isStudentDate, parseEvidencePath, tasksFromEntry } from '@/lib/homework-server';
+import { authorize, database, isStudentDate, parseEvidencePath, tasksFromEntry } from '../../../../lib/homework-server';
 
 const MAX_IMAGE_SIZE = 5 * 1024 * 1024;
 
