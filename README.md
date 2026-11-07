@@ -6,6 +6,8 @@
 
 Firebase の準備、ローカル起動、動作確認、Vercel 公開までの詳しい手順は [docs/はじめ方.md](docs/はじめ方.md) を参照してください。
 
+初回4週間の試用で記録率と操作時間を確認する場合は [4週間試用シート](docs/4週間試用シート.md) を使います。
+
 ## Firebase と Vercel の概要
 
 1. Firebase Console でプロジェクトを作り、Firestore Database を有効にします。Firestore は本番モードで開始します。

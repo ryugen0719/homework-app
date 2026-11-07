@@ -23,12 +23,28 @@ function normalizeTasks(value: unknown) {
 }
 
 export async function GET(request: Request) {
-  if (!authorize(request)) return respond('ページを表示できません', 404);
+  const role = authorize(request);
+  if (!role) return respond('ページを表示できません', 404);
   try {
     const db = database();
-    const [weekSnapshot, daySnapshot] = await Promise.all([db.collection('weeks').get(), db.collection('days').get()]);
-    const weeks = Object.fromEntries(weekSnapshot.docs.map((doc) => [doc.id, doc.data()]));
-    const entries = Object.fromEntries(daySnapshot.docs.map((doc) => [doc.id, Object.fromEntries(Object.entries(doc.data()).filter(([key]) => key !== 'photos'))]));
+    const weekStart = new URL(request.url).searchParams.get('weekStart');
+    if (!validDate(weekStart) || weekStartFor(weekStart) !== weekStart) return respond('週の指定を確認してください', 400);
+    const start = new Date(`${weekStart}T12:00:00+09:00`);
+    const dates = Array.from({ length: 7 }, (_, index) => {
+      const date = new Date(start);
+      date.setDate(date.getDate() + index);
+      return new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Tokyo' }).format(date);
+    });
+    const [weekSnapshot, weekDays, recentDays] = await Promise.all([
+      db.collection('weeks').doc(weekStart).get(),
+      Promise.all(dates.map((date) => db.collection('days').doc(date).get())),
+      role === 'student' ? db.collection('days').orderBy('date', 'desc').limit(12).get() : Promise.resolve(null),
+    ]);
+    const weekData = weekSnapshot.data();
+    if (weekData && role === 'teacher') delete weekData.studentTasks;
+    const weeks = weekData ? { [weekStart]: weekData } : {};
+    const uniqueDays = new Map([...weekDays, ...(recentDays?.docs || [])].flatMap((snapshot) => snapshot.exists ? [[snapshot.id, snapshot] as const] : []));
+    const entries = Object.fromEntries([...uniqueDays].map(([date, snapshot]) => [date, Object.fromEntries(Object.entries(snapshot.data() || {}).filter(([key]) => key !== 'photos' && !(role === 'student' && key === 'planHistory')))]));
     return NextResponse.json({ weeks, entries }, { headers: { 'Cache-Control': 'no-store' } });
   } catch {
     return respond('データを読み込めませんでした', 503);
@@ -130,6 +146,44 @@ export async function PUT(request: Request) {
         nextProgress.evidencePath = value.evidencePath;
       }
       await dayRef.set({ date, progress: { [value.taskId]: nextProgress }, updatedAt: new Date().toISOString() }, { merge: true });
+      return NextResponse.json({ ok: true }, { headers: { 'Cache-Control': 'no-store' } });
+    }
+
+    if (action === 'progress-batch') {
+      if (role !== 'student' || !validDate(value.date)) return respond('日付を確認してください', 400);
+      const date = value.date;
+      if (!isStudentDate(date)) return respond('実績は当日または前日の分を記録できます', 403);
+      if (!Array.isArray(value.records) || value.records.length > 20) return respond('記録内容を確認してください', 400);
+
+      const records: { taskId: string; actual: string; done: boolean }[] = [];
+      const seen = new Set<string>();
+      for (const item of value.records) {
+        if (!item || typeof item !== 'object') return respond('記録内容を確認してください', 400);
+        const record = item as Payload;
+        if (!validTaskId(record.taskId) || seen.has(record.taskId) || typeof record.actual !== 'string' || record.actual.length > 1000 || typeof record.done !== 'boolean') {
+          return respond('記録内容を確認してください', 400);
+        }
+        seen.add(record.taskId);
+        records.push({ taskId: record.taskId, actual: record.actual.trim(), done: record.done });
+      }
+
+      const weekData = (await db.collection('weeks').doc(weekStartFor(date)).get()).data() || {};
+      const weeklyTasks = [...tasksFromWeek(weekData), ...(Array.isArray(weekData.studentTasks) ? weekData.studentTasks as { id: string; text: string }[] : [])];
+      const validIds = new Set(weeklyTasks.map((task) => task.id));
+      if (records.some((record) => !validIds.has(record.taskId))) return respond('記録内容を確認してください', 400);
+
+      const dayRef = db.collection('days').doc(date);
+      await db.runTransaction(async (transaction) => {
+        const snapshot = await transaction.get(dayRef);
+        const previous = snapshot.data() || {};
+        const previousProgress = previous.progress && typeof previous.progress === 'object' ? previous.progress as Record<string, Payload> : {};
+        const progress = { ...previousProgress };
+        const now = new Date().toISOString();
+        for (const record of records) {
+          progress[record.taskId] = { ...(previousProgress[record.taskId] || {}), actual: record.actual, done: record.done, updatedAt: now };
+        }
+        transaction.set(dayRef, { date, progress, updatedAt: now }, { merge: true });
+      });
       return NextResponse.json({ ok: true }, { headers: { 'Cache-Control': 'no-store' } });
     }
 

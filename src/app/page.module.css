@@ -79,7 +79,8 @@
 .teacherWeekPreview { margin-top: 24px; padding-top: 18px; border-top: 1px solid var(--line); }
 .teacherWeekPreview h3 { margin: 0 0 10px; display: flex; align-items: center; gap: 8px; color: var(--ink); font-size: 13px; font-weight: 600; }
 .teacherWeekPreview h3 svg { color: var(--green); }
-.dayGrid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 0; }
+.dayGrid { display: grid; grid-template-columns: repeat(7, minmax(44px, 1fr)); gap: 0; overflow-x: auto; overscroll-behavior-x: contain; }
+.dayScrollHint { display: none; }
 .dayTile { min-width: 0; min-height: 82px; padding: 8px 4px 7px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: transparent; color: var(--ink); }
 .dayTile:hover { background: rgb(255 255 255 / 44%); }
 .dayTile > span { color: var(--muted); font-size: 11px; font-weight: 500; }
@@ -174,10 +175,16 @@
 .legacyPanel li { padding: 10px 0; display: grid; grid-template-columns: 150px 1fr; gap: 8px; border-top: 1px solid var(--line); font-size: 12px; }
 .legacyPanel li strong { white-space: nowrap; }
 .legacyPanel li span { color: var(--muted); overflow-wrap: anywhere; }
+.legacyPanel li > div { min-width: 0; }
+.legacyPanel li > div > p { margin: 0 0 5px; display: flex; justify-content: space-between; gap: 12px; }
+.legacyPanel li .historyComment { margin-top: 8px; color: var(--green-ink); }
+.optionalStudy summary { min-height: 44px; display: flex; align-items: center; color: var(--green-ink); font-size: 13px; font-weight: 600; cursor: pointer; }
+.optionalStudy details > p { margin: 4px 0 12px; color: var(--muted); font-size: 12px; }
 .visuallyHidden { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; clip-path: inset(50%); }
 .quiet { color: var(--muted); font-size: 12px; }
 .feedback, .error, .notice { width: min(100%, 1100px); margin: 12px auto; padding: 11px 14px; border-radius: 8px; font-size: 13px; }
-.feedback { color: var(--muted); }
+.feedback { position: fixed; inset-inline: 12px; bottom: max(12px, env(safe-area-inset-bottom)); z-index: 10; width: min(calc(100% - 24px), 560px); margin: 0 auto; background: var(--surface); color: var(--muted); box-shadow: 0 4px 18px rgb(20 35 30 / 14%); }
+.error, .notice { position: fixed; inset-inline: 12px; bottom: max(12px, env(safe-area-inset-bottom)); z-index: 10; width: min(calc(100% - 24px), 560px); margin: 0 auto; box-shadow: 0 4px 18px rgb(20 35 30 / 14%); }
 .error { background: var(--gold-soft); color: var(--gold-ink); }
 .notice { background: var(--green-soft); color: var(--green-ink); }
 @media (max-width: 700px) {
@@ -201,6 +208,7 @@
   .panelHeading p { max-width: 35ch; font-size: 12px; }
   .count { padding-right: 0; font-size: 11px; }
   .dayTile { min-height: 72px; padding: 6px 1px; }
+  .dayScrollHint { margin: 3px 0 5px; display: block; color: var(--muted); font-size: 12px; }
   .dayTile > span, .dayTile small { font-size: 11px; }
   .dayTile strong { font-size: 20px; }
   .comparison, .dailyComparison { grid-template-columns: 1fr; gap: 8px; }
