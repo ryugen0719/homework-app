@@ -249,7 +249,6 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
     </>}
 
     {role === '生徒' && <>
-      <>
         <section className={styles.panel}>
           <div className={styles.panelHeading}><div><div><h2>自宅学習を報告</h2><p>先生からの宿題がなくても、今日取り組んだことを追加できます。</p></div></div><span className={styles.count}>{tasks.length} 件</span></div>
           <div className={styles.assignmentRow}><label className={styles.visuallyHidden} htmlFor="self-study">学習内容</label><input id="self-study" value={selfTaskText} maxLength={500} placeholder="例：英単語を20個覚える" disabled={saving || tasks.length >= 20} onChange={(event) => setSelfTaskText(event.target.value)} /><button type="button" className={styles.primaryButton} disabled={saving || !selfTaskText.trim() || tasks.length >= 20} onClick={() => void addSelfTask()}><Plus size={17} />追加</button></div>
@@ -257,7 +256,7 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
           {tasks.map((task) => <article className={styles.planTask} key={task.id}><div className={styles.planTaskTitle}><span className={styles.taskNumber}>✓</span><h3>{task.text}</h3></div></article>)}
         </section>
         <section className={styles.panel}>
-          <div className={styles.panelHeading}><div><div><h2>一週間の計画</h2><p>日付を選び、その日の目標を決めます。</p></div></div><span className={styles.count}>{weekLabel(weekStart)}</span></div>
+          <div className={styles.panelHeading}><div><div><h2>一週間の計画</h2><p>日付を選び、その日の目標を決めます。</p></div></div><span className={styles.count}>{weekStart ? weekLabel(weekStart) : '今週'}</span></div>
           <div className={styles.dayGrid} role="group" aria-label="計画する日を選ぶ">{dates.map((date) => { const summary = planSummary(date); return <button type="button" key={date} className={`${styles.dayTile} ${date === day ? styles.selectedDay : ''} ${date === today ? styles.today : ''} ${summary.unsaved ? styles.dayHasDraft : ''}`} onClick={() => setSelectedDate(date)} aria-pressed={date === day} aria-label={`${formatDate(date)}、${summary.count ? `${summary.count}件の目標${summary.unsaved ? '、未保存' : ''}` : '目標なし'}`}><span>{new Intl.DateTimeFormat('ja-JP', { timeZone: 'Asia/Tokyo', weekday: 'short' }).format(dateAtJst(date))}</span><strong>{Number(date.slice(8, 10))}</strong><small>{summary.unsaved ? '未保存' : summary.count ? `${summary.count}件` : '未計画'}</small></button>; })}</div>
           <div className={styles.selectedDateHeading}><div><span>計画する日</span><h3>{day && formatDate(day)}</h3></div></div>
           <div className={styles.planList}>{tasks.map((task, index) => <article className={styles.planTask} key={task.id}><div className={styles.planTaskTitle}><span className={styles.taskNumber}>{index + 1}</span><h3>{task.text}</h3></div><label className={styles.planInputLabel}><span>今日の目標</span><textarea aria-label={`${task.text}、${formatDate(day)}の目標`} rows={2} maxLength={500} value={planDrafts[day]?.[task.id] ?? entries[day]?.plans?.[task.id] ?? ''} onChange={(event) => setPlan(day, task.id, event.target.value)} placeholder="例：ワーク p.12〜14" /></label></article>)}</div>
@@ -273,10 +272,9 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
             const currentEvidence = dayEntry.progress?.[task.id]?.evidencePath || getLegacyProgress(dayEntry, task.id)?.evidencePath;
             return <article className={styles.dailyTask} key={task.id}><div className={styles.dailyTaskHead}><div><span>宿題</span><h3>{task.text}</h3></div><label className={styles.doneToggle}><input type="checkbox" checked={item.done} disabled={!canEdit || saving} onChange={(event) => setProgress(day, task.id, { done: event.target.checked })} /><span>今日の目標までできた</span></label></div><div className={styles.dailyComparison}><div><span>今日の目標</span><p>{plan || '目標を設定していません'}</p></div><label className={styles.fieldLabel}>進んだ内容<textarea rows={2} maxLength={1000} disabled={!canEdit || saving} value={item.actual} onChange={(event) => setProgress(day, task.id, { actual: event.target.value })} placeholder="例：ワーク p.12〜14まで進みました" /></label></div><div className={styles.dailyActions}>{currentEvidence && <EvidencePreview pathname={currentEvidence} token={token} taskName={task.text} />}{canEdit && <label className={styles.uploadButton}><Camera size={16} />{uploading === task.id ? `送信中 ${uploadPercent}%` : currentEvidence ? '写真を変更' : '写真を追加'}<input type="file" accept="image/jpeg,image/png,image/webp" disabled={Boolean(uploading) || saving} onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadEvidence(task, file); event.target.value = ''; }} /></label>}</div></article>;
           })}</div>
-          <div className={styles.planFooter}><span>記録は当日または翌日まで編集できます。</span><button type="button" className={styles.primaryButton} disabled={saving || ![today, offsetDate(today, -1)].includes(day)} onClick={() => void saveDailyProgress()}><Save size={17} />{saving ? '保存中…' : '今日の実績を保存'}</button></div>
+          <div className={styles.planFooter}><span>記録は当日または翌日まで編集できます。</span><button type="button" className={styles.primaryButton} disabled={saving || !today || ![today, offsetDate(today, -1)].includes(day)} onClick={() => void saveDailyProgress()}><Save size={17} />{saving ? '保存中…' : '今日の実績を保存'}</button></div>
           {dayEntry.review?.reviewedAt && <div className={styles.teacherMessage}><span><MessageSquare size={17} />先生から</span><strong>{dayEntry.review.stamp}</strong>{dayEntry.review.comment && <p>{dayEntry.review.comment}</p>}</div>}
         </section>
-      </>}
     </>}
 
     {false && pastRecords.length > 0 && <section className={`${styles.panel} ${styles.legacyPanel}`}><details><summary>これまでの日別記録</summary></details></section>}

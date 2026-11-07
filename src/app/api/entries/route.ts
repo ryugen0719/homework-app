@@ -80,7 +80,11 @@ export async function PUT(request: Request) {
     if (action === 'student-week') {
       if (role !== 'student' || !validDate(value.weekStart) || weekStartFor(value.weekStart) !== value.weekStart) return respond('週の指定を確認してください', 400);
       const tasks = value.tasks === undefined ? [] : (Array.isArray(value.tasks) && value.tasks.length <= 20 ? value.tasks : null);
-      if (!tasks || tasks.some((item) => !item || typeof item !== 'object' || !validTaskId((item as Payload).id) || typeof (item as Payload).text !== 'string' || !(item as Payload).text.trim() || ((item as Payload).text as string).length > 500)) return respond('学習内容は20件以内、各500文字以内で入力してください', 400);
+      if (!tasks || tasks.some((item) => {
+        if (!item || typeof item !== 'object') return true;
+        const task = item as Payload;
+        return !validTaskId(task.id) || typeof task.text !== 'string' || !task.text.trim() || task.text.length > 500;
+      })) return respond('学習内容は20件以内、各500文字以内で入力してください', 400);
       const teacherTasks = tasksFromWeek((await db.collection('weeks').doc(value.weekStart).get()).data() || {});
       const ref = db.collection('weeks').doc(value.weekStart);
       await ref.set({ weekStart: value.weekStart, studentTasks: tasks, updatedAt: new Date().toISOString() }, { merge: true });
