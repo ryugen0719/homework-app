@@ -50,7 +50,7 @@ export async function PUT(request: Request) {
       const oldSnapshot = await ref.get();
       const old = tasksFromWeek(oldSnapshot.data() || {});
       const removed = old.filter((task) => !tasks.some((next) => next.id === task.id)).map((task) => task.id);
-      await ref.set({ weekStart: value.weekStart, tasks, updatedAt: new Date().toISOString() });
+      await ref.set({ weekStart: value.weekStart, tasks, updatedAt: new Date().toISOString() }, { merge: true });
       if (removed.length) {
         const days = await db.collection('days').get();
         const deletions: string[] = [];
@@ -77,14 +77,24 @@ export async function PUT(request: Request) {
       return NextResponse.json({ ok: true }, { headers: { 'Cache-Control': 'no-store' } });
     }
 
+    if (action === 'student-week') {
+      if (role !== 'student' || !validDate(value.weekStart) || weekStartFor(value.weekStart) !== value.weekStart) return respond('週の指定を確認してください', 400);
+      const tasks = value.tasks === undefined ? [] : (Array.isArray(value.tasks) && value.tasks.length <= 20 ? value.tasks : null);
+      if (!tasks || tasks.some((item) => !item || typeof item !== 'object' || !validTaskId((item as Payload).id) || typeof (item as Payload).text !== 'string' || !(item as Payload).text.trim() || ((item as Payload).text as string).length > 500)) return respond('学習内容は20件以内、各500文字以内で入力してください', 400);
+      const teacherTasks = tasksFromWeek((await db.collection('weeks').doc(value.weekStart).get()).data() || {});
+      const ref = db.collection('weeks').doc(value.weekStart);
+      await ref.set({ weekStart: value.weekStart, studentTasks: tasks, updatedAt: new Date().toISOString() }, { merge: true });
+      return NextResponse.json({ ok: true, tasks: [...teacherTasks, ...tasks] }, { headers: { 'Cache-Control': 'no-store' } });
+    }
+
     if (action === 'plan' || action === 'progress') {
       if (role !== 'student' || !validDate(value.date)) return respond('日付を確認してください', 400);
       const date = value.date;
       const weekStart = weekStartFor(date);
       const weekRef = db.collection('weeks').doc(weekStart);
       const weekSnapshot = await weekRef.get();
-      const weeklyTasks = tasksFromWeek(weekSnapshot.data() || {});
-      if (!weekSnapshot.exists || weeklyTasks.length === 0) return respond('この週の宿題はまだ登録されていません', 409);
+      const weekData = weekSnapshot.data() || {};
+      const weeklyTasks = [...tasksFromWeek(weekData), ...(Array.isArray(weekData.studentTasks) ? weekData.studentTasks as { id: string; text: string }[] : [])];
       const dayRef = db.collection('days').doc(date);
       const daySnapshot = await dayRef.get();
       const previous = daySnapshot.data() || {};

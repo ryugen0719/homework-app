@@ -61,6 +61,7 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
   const [planDrafts, setPlanDrafts] = useState<Record<string, Record<string, string>>>({});
   const [progressDrafts, setProgressDrafts] = useState<Record<string, Record<string, { actual: string; done: boolean }>>>({});
   const [reviewDrafts, setReviewDrafts] = useState<Record<string, { stamp: string; comment: string }>>({});
+  const [selfTaskText, setSelfTaskText] = useState('');
   const [view, setView] = useState<'assign' | 'review'>('assign');
   const [loading, setLoading] = useState(Boolean(accessToken));
   const [saving, setSaving] = useState(false);
@@ -69,7 +70,7 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
   const [uploading, setUploading] = useState('');
   const [uploadPercent, setUploadPercent] = useState(0);
   const [token] = useState(accessToken);
-  const tasks = weekDrafts[weekStart] || weeks[weekStart]?.tasks || [];
+  const tasks = role === '先生' ? (weekDrafts[weekStart] || weeks[weekStart]?.tasks || []) : [...(weeks[weekStart]?.tasks || []), ...((weeks[weekStart] as (WeekData & { studentTasks?: WeeklyTask[] }) | undefined)?.studentTasks || [])];
   const savedTasks = weeks[weekStart]?.tasks || [];
   const tasksDirty = JSON.stringify(tasks) !== JSON.stringify(savedTasks);
   const dayEntry = getDayEntry(entries, day);
@@ -122,6 +123,16 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
     if (!response?.ok) { setError('週の宿題を保存できませんでした。入力を確認してください。'); setSaving(false); return; }
     const next = { weekStart, tasks: valid };
     setWeeks((current) => ({ ...current, [weekStart]: next })); setWeekDrafts((current) => ({ ...current, [weekStart]: valid })); setSaving(false); notify('今週の宿題を保存しました');
+  }
+  async function addSelfTask() {
+    const text = selfTaskText.trim();
+    if (!text || tasks.length >= 20) return;
+    setSaving(true); setError('');
+    const studentTasks = [...(((weeks[weekStart] as (WeekData & { studentTasks?: WeeklyTask[] }) | undefined)?.studentTasks) || []), { id: crypto.randomUUID(), text }];
+    const response = await put({ action: 'student-week', weekStart, tasks: studentTasks });
+    if (!response?.ok) { setError('学習内容を追加できませんでした。'); setSaving(false); return; }
+    setWeeks((current) => ({ ...current, [weekStart]: { ...(current[weekStart] || { weekStart, tasks: [] }), studentTasks } as WeekData }));
+    setSelfTaskText(''); setSaving(false); notify('学習内容を追加しました');
   }
   async function savePlans() {
     const dayPlans = planDrafts[day];
@@ -202,7 +213,6 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
     </header>
 
     <section className={styles.intro}>
-      <h1>今週の歩幅を、ととのえる。</h1>
       <p>{role === '先生' ? '課題を決めて、毎日の取り組みを一緒に見守ります。' : '決めた課題を、できる日に少しずつ進めていきましょう。'}</p>
       <div className={styles.weekSummary}><span><strong>{role === '先生' ? tasks.length : weeklyPlanCount}</strong><small>{role === '先生' ? '今週の課題' : '計画した目標'}</small></span><span><strong>{role === '先生' ? allPlans : weeklyDoneCount}</strong><small>{role === '先生' ? '日ごとの目標' : '達成した目標'}</small></span></div>
     </section>
@@ -239,7 +249,13 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
     </>}
 
     {role === '生徒' && <>
-      {!tasks.length ? <section className={styles.panel}><div className={styles.emptyState}><span className={styles.emptyIcon}><ClipboardList size={24} /></span><h2>今週の宿題はまだありません</h2><p>先生が宿題を登録すると、ここに表示されます。</p></div></section> : <>
+      <>
+        <section className={styles.panel}>
+          <div className={styles.panelHeading}><div><div><h2>自宅学習を報告</h2><p>先生からの宿題がなくても、今日取り組んだことを追加できます。</p></div></div><span className={styles.count}>{tasks.length} 件</span></div>
+          <div className={styles.assignmentRow}><label className={styles.visuallyHidden} htmlFor="self-study">学習内容</label><input id="self-study" value={selfTaskText} maxLength={500} placeholder="例：英単語を20個覚える" disabled={saving || tasks.length >= 20} onChange={(event) => setSelfTaskText(event.target.value)} /><button type="button" className={styles.primaryButton} disabled={saving || !selfTaskText.trim() || tasks.length >= 20} onClick={() => void addSelfTask()}><Plus size={17} />追加</button></div>
+          {!tasks.length && <p className={styles.empty}>学習内容を追加すると、今日の記録欄が表示されます。</p>}
+          {tasks.map((task) => <article className={styles.planTask} key={task.id}><div className={styles.planTaskTitle}><span className={styles.taskNumber}>✓</span><h3>{task.text}</h3></div></article>)}
+        </section>
         <section className={styles.panel}>
           <div className={styles.panelHeading}><div><div><h2>一週間の計画</h2><p>日付を選び、その日の目標を決めます。</p></div></div><span className={styles.count}>{weekLabel(weekStart)}</span></div>
           <div className={styles.dayGrid} role="group" aria-label="計画する日を選ぶ">{dates.map((date) => { const summary = planSummary(date); return <button type="button" key={date} className={`${styles.dayTile} ${date === day ? styles.selectedDay : ''} ${date === today ? styles.today : ''} ${summary.unsaved ? styles.dayHasDraft : ''}`} onClick={() => setSelectedDate(date)} aria-pressed={date === day} aria-label={`${formatDate(date)}、${summary.count ? `${summary.count}件の目標${summary.unsaved ? '、未保存' : ''}` : '目標なし'}`}><span>{new Intl.DateTimeFormat('ja-JP', { timeZone: 'Asia/Tokyo', weekday: 'short' }).format(dateAtJst(date))}</span><strong>{Number(date.slice(8, 10))}</strong><small>{summary.unsaved ? '未保存' : summary.count ? `${summary.count}件` : '未計画'}</small></button>; })}</div>
@@ -263,7 +279,7 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
       </>}
     </>}
 
-    {pastRecords.length > 0 && <section className={`${styles.panel} ${styles.legacyPanel}`}><details><summary>これまでの日別記録（旧形式）</summary><p>新しい週の記録とは分けて、以前の宿題履歴を表示しています。</p><ul>{pastRecords.map((entry) => <li key={entry.date}><strong>{formatDate(entry.date)}</strong><span>{entry.tasks?.map((item) => `${item.done ? '済' : '未'} ${item.text}`).join(' / ') || entry.text}</span>{entry.tasks?.filter((item) => item.evidencePath).map((item) => <EvidencePreview key={item.id} pathname={item.evidencePath!} token={token} taskName={item.text} />)}{!entry.tasks?.length && entry.evidencePath && <EvidencePreview pathname={entry.evidencePath} token={token} taskName={entry.text || '宿題'} />}</li>)}</ul></details></section>}
+    {false && pastRecords.length > 0 && <section className={`${styles.panel} ${styles.legacyPanel}`}><details><summary>これまでの日別記録</summary></details></section>}
 
     {loading && <p className={styles.feedback} role="status">データを読み込んでいます…</p>}{error && <p className={styles.error} role="alert">{error}</p>}{notice && <p className={styles.notice} role="status">{notice}</p>}
   </main>;
