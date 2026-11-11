@@ -12,8 +12,8 @@ html[data-theme="light"] {
   --line: #E2D9C8;
   /* 4. 文字（墨）: 見出し、本文 */
   --text: #1E2A3A;
-  /* 5. サブ文字（暖かいグレー）: ラベル、説明、曜日 */
-  --text-sub: #7A766C;
+  /* 5. サブ文字（暖かいグレー・コントラスト改善）: ラベル、説明、曜日 */
+  --text-sub: #635F55;
   --text-faint: #7A766C;
 
   /* 6. メイン（藍）: ボタン、選択中、数字の強調 */
@@ -275,47 +275,135 @@ a { color: inherit; }
 
 .highlight-mark { background: linear-gradient(transparent 60%, var(--yamabuki) 60%); color: var(--text); }
 .session-minutes { align-self: start; border-radius: var(--radius-full); background: var(--indigo-soft); color: var(--indigo-ink); padding: 4px 12px; font: 800 16px/1.5 "Nunito", sans-serif; white-space: nowrap; }
-.day-has-record-indicator { display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: var(--vermilion); color: #FFFFFF; }
-.day-no-record-indicator { color: var(--text-sub); }
+
+/* 日付インジケーター */
+.day-has-record-indicator { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--vermilion); color: #FFFFFF; font-size: 11px; }
+.day-reviewed-indicator { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--vermilion-soft); border: 1.5px solid var(--vermilion); color: var(--vermilion-dark); font-size: 12px; font-weight: 800; line-height: 1; }
+.day-no-record-indicator { color: var(--text-sub); opacity: 0.6; font-size: 14px; }
+.today-mark { display: block; width: 4px; height: 4px; border-radius: 50%; background: var(--primary); margin: 0 auto; }
+
 .session-check { color: var(--vermilion); margin-top: 3px; }
 .teacher-record-heading { align-items: center; }
-.shell > header { margin-bottom: 32px; }
+.shell > header { margin-bottom: 24px; }
 .shell > header .brand p { color: var(--text-sub); font-size: 14px; font-weight: 700; }
 .shell > header [aria-label="週を選ぶ"] > div { align-items: center; }
 .shell > header [aria-label="週を選ぶ"] > div > span { display: none; }
 .shell > section:has(> h1) { align-items: flex-start; text-align: left; }
 .shell > section:has(> h1) h1 { font-size: 28px; font-weight: 800; }
-.shell > section:has(> h1) .weekSummary { margin-top: 24px; }
-.shell > section:has(> h1) .weekSummary strong { font-size: 40px; }
-.shell > section:has(> h1) .weekSummary > span { min-width: 140px; padding: 0 24px 0 0; }
-.shell > section:has(> h1) .weekSummary > span + span { padding-left: 24px; }
-.shell [role="group"][aria-label="記録の日付"] { border-top: 1px solid var(--border); }
-.shell [role="group"][aria-label="記録の日付"] > button { min-height: 72px; height: 72px; border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); border-radius: 0; gap: 4px; }
-.shell [role="group"][aria-label="記録の日付"] > button:last-child { border-right: 0; }
+.shell > section:has(> h1) .weekSummary { margin-top: 20px; }
+.shell > section:has(> h1) .weekSummary strong { font-size: 38px; }
+.shell > section:has(> h1) .weekSummary > span { min-width: 130px; padding: 0 20px 0 0; }
+.shell > section:has(> h1) .weekSummary > span + span { padding-left: 20px; }
+
+/* 7日カレンダーグリッドの完全レスポンシブ等幅化 */
+.shell [role="group"][aria-label="記録の日付"] { border-top: 1px solid var(--border); border-left: 1px solid var(--border); }
+.shell [role="group"][aria-label="記録の日付"] > button { min-height: 74px; height: auto; border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); border-radius: 0; gap: 2px; padding: 8px 2px; }
 .shell [role="group"][aria-label="記録の日付"] > button[aria-pressed="true"] { background: var(--primary); color: var(--on-primary); }
 .shell [role="group"][aria-label="記録の日付"] > button[aria-pressed="true"] > span,
 .shell [role="group"][aria-label="記録の日付"] > button[aria-pressed="true"] > strong,
 .shell [role="group"][aria-label="記録の日付"] > button[aria-pressed="true"] > small { color: var(--on-primary); }
 .shell [role="group"][aria-label="記録の日付"] > button[aria-pressed="true"] .day-has-record-indicator { color: var(--vermilion); background: #FFFFFF; }
-.shell [role="group"][aria-label="記録の日付"] > button.future-day { opacity: .52; }
+.shell [role="group"][aria-label="記録の日付"] > button[aria-pressed="true"] .day-reviewed-indicator { background: #FFFFFF; border-color: #FFFFFF; color: var(--vermilion); }
+.shell [role="group"][aria-label="記録の日付"] > button[aria-pressed="true"] .today-mark { background: #FFFFFF; }
+.shell [role="group"][aria-label="記録の日付"] > button.future-day { opacity: .45; }
+
+/* 土日の視認性カラー */
+.shell [role="group"][aria-label="記録の日付"] > button.day-sat:not([aria-pressed="true"]) > span { color: #2E5C8A; font-weight: 600; }
+.shell [role="group"][aria-label="記録の日付"] > button.day-sun:not([aria-pressed="true"]) > span { color: var(--vermilion); font-weight: 600; }
+html[data-theme="dark"] .shell [role="group"][aria-label="記録の日付"] > button.day-sat:not([aria-pressed="true"]) > span { color: #8FA8D8; }
+
 .shell .teacher-record-heading { margin-bottom: 8px; }
 .shell .teacher-record-heading h2 { font-size: 18px; font-weight: 700; }
 .shell .teacher-record-heading .count { font: 800 20px/1.4 "Nunito", sans-serif; color: var(--text); }
 .shell .teacher-session { grid-template-columns: 24px minmax(0,1fr) auto; align-items: start; gap: 12px; }
 .shell .teacher-session .sessionBody > p { margin: 0; }
-.shell .stamps > button { box-shadow: 0 3px 0 var(--border); transition: transform .2s ease, box-shadow .2s ease, background .2s ease; }
-.shell .stamps > button:active { transform: translateY(2px) scale(1.02); box-shadow: none; }
-.shell .stamps > button[aria-pressed="true"] { background: var(--primary); color: var(--on-primary); border-color: var(--primary); }
-.shell .stamps > button.stamp-great { border-color: var(--vermilion); background: var(--vermilion-soft); color: var(--vermilion-dark); }
-.shell .stamps > button.stamp-great[aria-pressed="true"] { background: var(--vermilion); color: var(--on-vermilion); border-color: var(--vermilion); }
+
+/* 先生スタンプのハンコ風リッチデザイン */
+.shell .stamps > button {
+  position: relative;
+  box-shadow: 0 3px 0 var(--border);
+  transition: transform .18s ease, box-shadow .18s ease, background .18s ease, border-color .18s ease;
+  font-family: "M PLUS Rounded 1c", "Noto Sans JP", sans-serif;
+  letter-spacing: 0.02em;
+}
+.shell .stamps > button:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+.shell .stamps > button:active:not(:disabled) {
+  transform: translateY(2px) scale(0.98);
+  box-shadow: none;
+}
+.shell .stamps > button[aria-pressed="true"] {
+  background: var(--primary);
+  color: var(--on-primary);
+  border-color: var(--primary);
+}
+.shell .stamps > button.stamp-great {
+  border-color: var(--vermilion);
+  background: var(--vermilion-soft);
+  color: var(--vermilion-dark);
+}
+.shell .stamps > button.stamp-great[aria-pressed="true"] {
+  background: var(--vermilion);
+  color: var(--on-vermilion);
+  border-color: var(--vermilion);
+  box-shadow: 0 0 0 2px var(--card), 0 0 0 4px var(--vermilion);
+  transform: rotate(-1.5deg);
+}
+.shell .stamps > button.stamp-neat[aria-pressed="true"] {
+  transform: rotate(1deg);
+}
+.shell .stamps > button.stamp-checked[aria-pressed="true"] {
+  transform: rotate(-1deg);
+}
+
+/* リアルな朱肉ハンコバッジ（生徒表示用） */
+.hanko-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border-radius: var(--radius-full);
+  border: 2px solid var(--vermilion);
+  background: var(--vermilion-soft);
+  color: var(--vermilion-dark);
+  font-family: "M PLUS Rounded 1c", "Noto Sans JP", sans-serif;
+  font-weight: 800;
+  font-size: 15px;
+  line-height: 1.4;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--vermilion) 30%, transparent);
+  transform: rotate(-2deg);
+}
+.hanko-flower {
+  border-radius: 12px;
+  border: 2.5px double var(--vermilion);
+  background: color-mix(in srgb, var(--vermilion-soft) 85%, #fff);
+  color: var(--vermilion-dark);
+  padding: 6px 14px;
+}
+
+/* カレンダースタンプエフェクト */
+.stamp-pop {
+  animation: stamp-pop-in 220ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+@keyframes stamp-pop-in {
+  0% { transform: scale(0.6) rotate(-10deg); opacity: 0; }
+  100% { transform: scale(1) rotate(0deg); opacity: 1; }
+}
+
+.calendar-cell-active {
+  box-shadow: 0 4px 12px rgba(46, 74, 125, 0.25);
+}
+
 .shell [role="group"][aria-label="記録の日付"] > button[aria-pressed="true"],
 .shell .stamps > button[aria-pressed="true"] { animation: record-complete 200ms ease-out; }
 .shell .primaryButton { box-shadow: 0 4px 0 var(--primary-dark); background-color: var(--primary); color: var(--on-primary); }
 .shell :focus-visible { outline: 3px solid var(--primary); outline-offset: 3px; }
-.shell .dayScrollHint { text-align: left; }
+.shell .dayScrollHint { display: none; }
+
 @media (max-width: 700px) {
-  .shell > header { margin-bottom: 24px; }
-  .shell [role="group"][aria-label="記録の日付"] > button { min-width: 48px; }
+  .shell > header { margin-bottom: 20px; }
+  .shell [role="group"][aria-label="記録の日付"] > button { min-width: 0; width: 100%; min-height: 68px; }
   .shell .teacher-session { grid-template-columns: 24px minmax(0,1fr) auto; }
 }
 

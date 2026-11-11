@@ -6,6 +6,14 @@ type Payload = Record<string, unknown>;
 const stamps = ['確認しました', 'よくできました', 'ていねいです'];
 const todayJst = () => new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Tokyo' }).format(new Date());
 const validSessionId = (id: unknown): id is string => typeof id === 'string' && /^[a-f0-9-]{36}$/i.test(id);
+function validMonth(month: unknown): month is string {
+  if (typeof month !== 'string') return false;
+  const match = /^(\d{4})-(\d{2})$/.exec(month);
+  if (!match) return false;
+  const year = Number(match[1]);
+  const m = Number(match[2]);
+  return year >= 2000 && year <= 2100 && m >= 1 && m <= 12;
+}
 
 function respond(message: string, status: number) {
   return NextResponse.json({ error: message }, { status, headers: { 'Cache-Control': 'no-store' } });
@@ -16,14 +24,33 @@ export async function GET(request: Request) {
   if (!role) return respond('ページを表示できません', 404);
   try {
     const db = database();
-    const weekStart = new URL(request.url).searchParams.get('weekStart');
-    if (!validDate(weekStart) || weekStartFor(weekStart) !== weekStart) return respond('週の指定を確認してください', 400);
-    const start = new Date(`${weekStart}T12:00:00+09:00`);
-    const dates = Array.from({ length: 7 }, (_, index) => {
-      const date = new Date(start);
-      date.setDate(date.getDate() + index);
-      return new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Tokyo' }).format(date);
-    });
+    const url = new URL(request.url);
+    const month = url.searchParams.get('month');
+    const weekStart = url.searchParams.get('weekStart');
+
+    let dates: string[] = [];
+    if (month) {
+      if (!validMonth(month)) return respond('月の指定を確認してください', 400);
+      const [yearStr, monthStr] = month.split('-');
+      const year = Number(yearStr);
+      const m = Number(monthStr);
+      const lastDay = new Date(year, m, 0).getDate();
+      dates = Array.from({ length: lastDay }, (_, index) => {
+        const dayStr = String(index + 1).padStart(2, '0');
+        return `${month}-${dayStr}`;
+      });
+    } else if (weekStart) {
+      if (!validDate(weekStart) || weekStartFor(weekStart) !== weekStart) return respond('週の指定を確認してください', 400);
+      const start = new Date(`${weekStart}T12:00:00+09:00`);
+      dates = Array.from({ length: 7 }, (_, index) => {
+        const date = new Date(start);
+        date.setDate(date.getDate() + index);
+        return new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Tokyo' }).format(date);
+      });
+    } else {
+      return respond('月または週を指定してください', 400);
+    }
+
     const snapshots = await Promise.all(dates.map((date) => db.collection('days').doc(date).get()));
     const entries = Object.fromEntries(snapshots.flatMap((snapshot, index) => {
       if (!snapshot.exists) return [];
