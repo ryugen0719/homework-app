@@ -3,7 +3,6 @@ import { NextResponse } from 'next/server';
 import { authorize, database, isStudentDate, parseEvidencePath, sessionsFromDay, validDate, weekStartFor } from '../../../lib/homework-server';
 
 type Payload = Record<string, unknown>;
-const stamps = ['確認しました', 'よくできました', 'ていねいです'];
 const todayJst = () => new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Tokyo' }).format(new Date());
 const validSessionId = (id: unknown): id is string => typeof id === 'string' && /^[a-f0-9-]{36}$/i.test(id);
 function validMonth(month: unknown): month is string {
@@ -27,6 +26,23 @@ export async function GET(request: Request) {
     const url = new URL(request.url);
     const month = url.searchParams.get('month');
     const weekStart = url.searchParams.get('weekStart');
+    const oldestUnreviewed = url.searchParams.get('oldestUnreviewed');
+
+    if (oldestUnreviewed !== null) {
+      if (role !== 'teacher') return respond('この操作はできません', 403);
+      if (oldestUnreviewed !== 'true') return respond('検索内容を確認してください', 400);
+      const snapshots = await db.collection('days').select('sessions', 'review').get();
+      const earliest = snapshots.docs
+        .filter((snapshot) => validDate(snapshot.id) && snapshot.id <= todayJst())
+        .sort((left, right) => left.id < right.id ? -1 : left.id > right.id ? 1 : 0)
+        .find((snapshot) => {
+          const data = snapshot.data();
+          const rawReview = data.review && typeof data.review === 'object' ? data.review as Payload : {};
+          const reviewed = typeof rawReview.comment === 'string' && typeof rawReview.reviewedAt === 'string';
+          return sessionsFromDay(data).length > 0 && !reviewed;
+        });
+      return NextResponse.json({ date: earliest?.id ?? null }, { headers: { 'Cache-Control': 'no-store' } });
+    }
 
     let dates: string[] = [];
     if (month) {
@@ -57,11 +73,9 @@ export async function GET(request: Request) {
       const data = snapshot.data() || {};
       const sessions = sessionsFromDay(data);
       const rawReview = data.review && typeof data.review === 'object' ? data.review as Payload : {};
-      const review = typeof rawReview.stamp === 'string'
-        && stamps.includes(rawReview.stamp)
-        && typeof rawReview.comment === 'string'
+      const review = typeof rawReview.comment === 'string'
         && typeof rawReview.reviewedAt === 'string'
-        ? { stamp: rawReview.stamp, comment: rawReview.comment, reviewedAt: rawReview.reviewedAt }
+        ? { comment: rawReview.comment, reviewedAt: rawReview.reviewedAt }
         : undefined;
       return [[dates[index], {
         date: dates[index],
@@ -159,15 +173,14 @@ export async function PUT(request: Request) {
 
     if (action === 'review') {
       if (role !== 'teacher' || !validDate(value.date) || value.date > todayJst()) return respond('この操作はできません', 403);
-      if (typeof value.comment !== 'string' || value.comment.length > 120 || typeof value.stamp !== 'string' || !stamps.includes(value.stamp)) return respond('確認内容を確認してください', 400);
+      if (typeof value.comment !== 'string' || value.comment.length > 120) return respond('返信コメントを確認してください', 400);
       const comment = value.comment.trim();
-      const stamp = value.stamp;
       const ref = db.collection('days').doc(value.date);
       const found = await db.runTransaction(async (transaction) => {
         const snapshot = await transaction.get(ref);
         const previous = snapshot.data() || {};
         if (!sessionsFromDay(previous).length) return false;
-        transaction.set(ref, { date: value.date, review: { stamp, comment, reviewedAt: new Date().toISOString() } }, { merge: true });
+        transaction.set(ref, { date: value.date, review: { comment, reviewedAt: new Date().toISOString() } }, { merge: true });
         return true;
       });
       if (!found) return respond('学習記録がありません', 404);

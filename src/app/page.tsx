@@ -1,15 +1,13 @@
 'use client';
 /* eslint-disable @next/next/no-img-element */
 
-import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { upload } from '@vercel/blob/client';
 import {
   Award,
   BadgeCheck,
   Calendar,
   Check,
-  CheckCheck,
-  CheckCircle2,
   ChevronLeft,
   ChevronRight,
   Flame,
@@ -24,14 +22,14 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
+import { FiBookOpen } from 'react-icons/fi';
 import { ui } from './ui';
 
 type StudySession = { id: string; content: string; minutes?: number; evidencePath?: string; createdAt?: string; updatedAt?: string };
-type Review = { stamp?: string; comment?: string; reviewedAt?: string };
+type Review = { comment?: string; reviewedAt?: string };
 type DayEntry = { date: string; sessions: StudySession[]; review?: Review };
 type Draft = { id: string; content: string; minutes: string };
 
-const stamps = ['よくできました', 'ていねいです', '確認しました'];
 const QUICK_MINUTES = [15, 30, 45, 60];
 
 const emptySubscribe = () => () => {};
@@ -85,25 +83,12 @@ function RecordSeal({ size = 20, className = '' }: { size?: number; className?: 
   return (
     <span
       style={{ width: size, height: size }}
-      className={`stamp-seal inline-grid place-items-center rounded-full bg-reward text-white shadow-[0_1.5px_4px_rgba(200,64,43,0.35)] transition-transform ${className}`}
+      className={`stamp-seal inline-grid place-items-center rounded-full bg-reward text-white ${className}`}
       aria-label="勉強完了シール"
     >
       <Check size={Math.round(size * 0.62)} strokeWidth={3} className="stroke-white" />
     </span>
   );
-}
-
-/**
- * スタンプ名に応じた Lucide アイコン
- */
-function getStampIcon(stampName?: string, size = 16) {
-  if (stampName === 'よくできました') {
-    return <BadgeCheck size={size} strokeWidth={2.4} className="text-reward fill-reward/20" />;
-  }
-  if (stampName === 'ていねいです') {
-    return <Sparkles size={size} strokeWidth={2.2} className="text-[#D97706]" />;
-  }
-  return <CheckCheck size={size} strokeWidth={2.2} className="text-primary" />;
 }
 
 function EvidencePreview({
@@ -168,14 +153,17 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
 
   // 選択中の日付（YYYY-MM-DD）
   const [selectedDate, setSelectedDate] = useState('');
+  const teacherManuallyNavigated = useRef(false);
+  const [calendarView, setCalendarView] = useState<'week' | 'month'>('week');
   const day = selectedDate || today || '';
 
   const [entries, setEntries] = useState<Record<string, DayEntry>>({});
   const [loadedMonths, setLoadedMonths] = useState<Record<string, boolean>>({});
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
-  const [reviewDrafts, setReviewDrafts] = useState<Record<string, { stamp: string; comment: string }>>({});
+  const [reviewDrafts, setReviewDrafts] = useState<Record<string, { comment: string }>>({});
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [teacherSearchError, setTeacherSearchError] = useState('');
   const [notice, setNotice] = useState('');
   const [uploading, setUploading] = useState('');
   const [uploadPercent, setUploadPercent] = useState(0);
@@ -188,7 +176,9 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
   const sessions = entry.sessions || [];
   const draft = drafts[day] || { id: '', content: '', minutes: '' };
   const savedReview = entry.review || {};
-  const reviewDraft = reviewDrafts[day] || { stamp: savedReview.stamp || stamps[0], comment: savedReview.comment || '' };
+  const reviewDraft = reviewDrafts[day] || { comment: savedReview.comment || '' };
+  const reviewHasChanges = reviewDraft.comment.trim() !== (savedReview.comment || '').trim();
+  const reviewCanSave = reviewHasChanges || !savedReview.reviewedAt;
 
   const dayMinutes = sessions.reduce((sum, session) => sum + (session.minutes || 0), 0);
   const canLog = Boolean(today && day <= today);
@@ -262,6 +252,16 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
 
     return cells;
   }, [currentMonth]);
+  const selectedCalendarIndex = calendarCells.findIndex((cell) => cell.date === day);
+  const selectedWeekStart = selectedCalendarIndex >= 0 ? Math.floor(selectedCalendarIndex / 7) * 7 : 0;
+  const weekCalendarCells = calendarCells.slice(selectedWeekStart, selectedWeekStart + 7);
+  const visibleCalendarCells = calendarView === 'week' ? weekCalendarCells : calendarCells;
+  const calendarRangeLabel = calendarView === 'week' && weekCalendarCells.length === 7
+    ? `${Number(weekCalendarCells[0].date.slice(5, 7))}/${Number(weekCalendarCells[0].date.slice(8, 10))}〜${Number(weekCalendarCells[6].date.slice(5, 7))}/${Number(weekCalendarCells[6].date.slice(8, 10))}`
+    : monthLabel(currentMonth);
+  const calendarLabel = calendarView === 'week' && weekCalendarCells.length === 7
+    ? `${formatDate(weekCalendarCells[0].date)}から${formatDate(weekCalendarCells[6].date)}までの週間カレンダー`
+    : `${monthLabel(currentMonth)}のカレンダー`;
 
   const hasUnsavedChanges = Object.entries(drafts).some(([date, item]) => {
     if (!item.id) return Boolean(item.content.trim() || item.minutes.trim());
@@ -269,7 +269,7 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
     return Boolean(saved && (item.content !== saved.content || item.minutes !== (saved.minutes?.toString() || '')));
   }) || Object.entries(reviewDrafts).some(([date, item]) => {
     const saved = entries[date]?.review || {};
-    return item.stamp !== (saved.stamp || stamps[0]) || item.comment !== (saved.comment || '');
+    return item.comment !== (saved.comment || '');
   });
 
   // 月データのフェッチ
@@ -300,22 +300,57 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
   }, [token, currentMonth, loadedMonths]);
 
   useEffect(() => {
+    if (role !== '先生' || !token || !today) return;
+    const controller = new AbortController();
+    fetch('/api/entries?oldestUnreviewed=true', {
+      headers: { 'x-app-token': token },
+      signal: controller.signal,
+      cache: 'no-store',
+    })
+      .then(async (response) => {
+        if (!response.ok) throw new Error();
+        return (await response.json()) as { date?: string | null };
+      })
+      .then(({ date }) => {
+        if (typeof date === 'string' && !teacherManuallyNavigated.current) {
+          setSelectedMonth(date.slice(0, 7));
+          setSelectedDate(date);
+          setShowPastComposer(false);
+        }
+        setTeacherSearchError('');
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) {
+          setTeacherSearchError('未確認の学習記録を確認できませんでした。通信状況を確認してください。');
+        }
+      });
+    return () => controller.abort();
+  }, [role, token, today]);
+
+  useEffect(() => {
     if (!hasUnsavedChanges && !saving && !uploading) return;
     const warnBeforeLeave = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ''; };
     window.addEventListener('beforeunload', warnBeforeLeave);
     return () => window.removeEventListener('beforeunload', warnBeforeLeave);
   }, [hasUnsavedChanges, saving, uploading]);
 
-  function changeMonth(offset: number) {
+  function changeCalendarRange(offset: number) {
     if (!currentMonth) return;
-    const [yearStr, monthStr] = currentMonth.split('-');
-    const date = new Date(Number(yearStr), Number(monthStr) - 1 + offset, 1);
-    const nextMonth = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-    setSelectedMonth(nextMonth);
-    if (today && today.startsWith(nextMonth)) {
-      setSelectedDate(today);
+    teacherManuallyNavigated.current = true;
+    if (calendarView === 'week') {
+      const nextDate = offsetDate(day, offset * 7);
+      setSelectedMonth(nextDate.slice(0, 7));
+      setSelectedDate(nextDate);
     } else {
-      setSelectedDate(`${nextMonth}-01`);
+      const [yearStr, monthStr] = currentMonth.split('-');
+      const date = new Date(Number(yearStr), Number(monthStr) - 1 + offset, 1);
+      const nextMonth = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+      setSelectedMonth(nextMonth);
+      if (today && today.startsWith(nextMonth)) {
+        setSelectedDate(today);
+      } else {
+        setSelectedDate(`${nextMonth}-01`);
+      }
     }
     setShowPastComposer(false);
     setError('');
@@ -323,6 +358,7 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
 
   function goToToday() {
     if (!today) return;
+    teacherManuallyNavigated.current = true;
     setSelectedMonth(today.slice(0, 7));
     setSelectedDate(today);
     setShowPastComposer(false);
@@ -396,12 +432,13 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
   async function saveReview() {
     if (!dataReady || !sessions.length) return;
     setSaving(true); setError('');
-    const response = await put({ action: 'review', date: day, ...reviewDraft });
+    const comment = reviewDraft.comment.trim();
+    const response = await put({ action: 'review', date: day, comment });
     if (!response?.ok) { setError('フィードバックを保存できませんでした。通信状況を確認してください。'); setSaving(false); return; }
-    const nextReview = { ...reviewDraft, reviewedAt: new Date().toISOString() };
+    const nextReview = { comment, reviewedAt: new Date().toISOString() };
     updateDay(day, { review: nextReview });
-    setReviewDrafts((current) => ({ ...current, [day]: { stamp: nextReview.stamp || stamps[0], comment: nextReview.comment || '' } }));
-    setSaving(false); notify('生徒へのフィードバックを保存しました');
+    setReviewDrafts((current) => ({ ...current, [day]: { comment } }));
+    setSaving(false); notify(comment ? '返信を保存しました' : '確認済みにしました');
   }
 
   return (
@@ -409,8 +446,8 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
       <header className={ui.header}>
         <div className={ui.brand}>
           <div className="flex items-center gap-2">
-            <span className="grid size-8 place-items-center rounded-lg bg-primary-soft text-primary font-bold text-sm">
-              記
+            <span className={ui.brandIcon}>
+              <FiBookOpen size={20} aria-hidden="true" />
             </span>
             <p>宿題ノート／{role}用</p>
           </div>
@@ -439,32 +476,159 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
 
       {/* サマリー＆モチベーション */}
       <section className={role === '先生' ? ui.teacherIntro : `${ui.intro} ${ui.introCompact}`}>
-        <div className="flex items-center gap-2 mb-1">
-          <span className="text-xs font-bold uppercase tracking-wider text-muted">Study Calendar</span>
+        <h1 className={ui.pageTitle}>{role === '先生' ? '学習記録を確認' : '今日の学びを記録しよう'}</h1>
+        <p className={ui.pageDescription}>
+          {role === '先生' ? '未確認は古い日から表示。コメントなしでも確認できます。' : '今月の記録をまとめて、先生と振り返ります。'}
+        </p>
+      </section>
+
+      <div className={ui.workspaceGrid}>
+      <div className={ui.calendarColumn}>
+      <section className={ui.calendarCard} aria-label={calendarView === 'week' ? '週間カレンダー' : '月間カレンダー'}>
+        {/* 表示範囲のヘッダー */}
+        <div className={ui.monthPicker}>
+          <button
+            type="button"
+            className={ui.monthNavBtn}
+            onClick={() => changeCalendarRange(-1)}
+            aria-label={calendarView === 'week' ? '前の週' : '前の月'}
+            title={calendarView === 'week' ? '前の週へ' : '前の月へ'}
+          >
+            <ChevronLeft size={18} />
+          </button>
+          
+          <div className={ui.monthTitle} title={calendarLabel}>
+            <Calendar size={18} className="text-primary" />
+            <span>{calendarRangeLabel}</span>
+          </div>
+
+          <button
+            type="button"
+            className={ui.monthNavBtn}
+            onClick={() => changeCalendarRange(1)}
+            aria-label={calendarView === 'week' ? '次の週' : '次の月'}
+            title={calendarView === 'week' ? '次の週へ' : '次の月へ'}
+          >
+            <ChevronRight size={18} />
+          </button>
+          <button
+            type="button"
+            className={ui.calendarViewToggle}
+            onClick={() => setCalendarView(calendarView === 'week' ? 'month' : 'week')}
+            aria-expanded={calendarView === 'month'}
+            aria-controls="calendar-days"
+            aria-label={calendarView === 'week' ? '月全体を見る' : '週間表示に戻る'}
+            title={calendarView === 'week' ? '月全体を見る' : '週間表示に戻る'}
+          >
+            {calendarView === 'week' ? '月' : '週'}
+          </button>
         </div>
-        <h1 className={ui.pageTitle}>学習の記録</h1>
-        
-        <div className={ui.weekSummary} aria-label="今月の学習まとめ">
-          <span>
-            <strong className="text-primary">{dataReady ? `${monthRecordedDays}日` : '—'}</strong>
-            <small>{monthLabel(currentMonth)}の勉強日数</small>
-          </span>
-          <span>
-            <strong className="text-reward flex items-center justify-center gap-1.5">
-              <BadgeCheck size={24} strokeWidth={2.2} className="fill-reward/20 text-reward" />
-              {dataReady ? monthReviewedCount : '—'}
-              <span className="text-sm font-normal text-muted">個</span>
-            </strong>
-            <small>先生の確認済み</small>
-          </span>
-          <span>
-            <strong className="text-ink">{dataReady && monthTotalMinutes > 0 ? `${monthTotalMinutes}分` : '—'}</strong>
-            <small>学習時間（合計）</small>
-          </span>
+
+        {/* 曜日ヘッダー */}
+        {calendarView === 'month' && <div className={ui.calendarWeekdays} aria-hidden="true">
+          <span>月</span>
+          <span>火</span>
+          <span>水</span>
+          <span>木</span>
+          <span>金</span>
+          <span className="text-primary-ink">土</span>
+          <span className="text-reward-ink">日</span>
+        </div>}
+
+        {/* 日付グリッド */}
+        <div id="calendar-days" className={ui.calendarGrid} role="grid" aria-label={calendarLabel}>
+          {visibleCalendarCells.map((cell) => {
+            const isSelected = cell.date === day;
+            const isToday = cell.date === today;
+            const isFuture = Boolean(today && cell.date > today);
+            const cellEntry = entries[cell.date];
+            const hasRecord = Boolean(cellEntry?.sessions?.length);
+            const isReviewed = Boolean(cellEntry?.review?.reviewedAt);
+            const cellMins = cellEntry?.sessions?.reduce((sum, s) => sum + (s.minutes || 0), 0) || 0;
+            const sessionCount = cellEntry?.sessions?.length || 0;
+            const isSat = cell.dayOfWeek === 6;
+            const isSun = cell.dayOfWeek === 0;
+            const weekdayLabel = ['日', '月', '火', '水', '木', '金', '土'][cell.dayOfWeek];
+
+            return (
+              <button
+                key={cell.date}
+                type="button"
+                disabled={calendarView === 'month' && !cell.isCurrentMonth}
+                className={`${ui.calendarCell} ${calendarView === 'week' ? ui.calendarCellWeek : ''} ${calendarView === 'month' && !cell.isCurrentMonth ? ui.calendarCellOtherMonth : ''} ${isSelected ? ui.calendarCellSelected : ''} ${isToday && !isSelected ? ui.calendarCellToday : ''} ${isFuture ? ui.calendarCellFuture : ''} ${hasRecord && !isSelected ? 'bg-reward-soft/35 border-reward/20' : ''}`}
+                onClick={() => {
+                  teacherManuallyNavigated.current = true;
+                  if (cell.date.slice(0, 7) !== currentMonth) setSelectedMonth(cell.date.slice(0, 7));
+                  setSelectedDate(cell.date);
+                  setShowPastComposer(false);
+                }}
+                aria-pressed={isSelected}
+                aria-label={`${formatDate(cell.date)}${hasRecord ? `、記録${sessionCount}件` : ''}${isReviewed ? '、先生の確認あり' : ''}`}
+              >
+                {calendarView === 'week' && (
+                  <span className={`${ui.calendarWeekdayLabel} ${isSat && !isSelected ? 'text-primary-ink' : ''} ${isSun && !isSelected ? 'text-reward-ink' : ''}`}>
+                    {weekdayLabel}
+                  </span>
+                )}
+                {/* 日付の数字 */}
+                <span className={`${ui.calendarDayNum} ${isSat && !isSelected ? 'text-primary-ink' : ''} ${isSun && !isSelected ? 'text-reward-ink' : ''}`}>
+                  {cell.dayNumber}
+                </span>
+
+                {/* 記録マークエリア（Lucide Icons） */}
+                <div className={`${ui.calendarMarkerArea} ${calendarView === 'week' ? ui.calendarMarkerCompact : ''}`}>
+                  {isReviewed ? (
+                    <TeacherCheckIcon size={calendarView === 'week' ? 16 : 22} className={isSelected ? '!text-white [&_svg]:!fill-white/30 [&_svg]:!stroke-white' : ''} />
+                  ) : hasRecord ? (
+                    <RecordSeal size={calendarView === 'week' ? 14 : 18} className={isSelected ? '!bg-white !text-primary' : ''} />
+                  ) : isToday ? (
+                    <span className="today-dot size-1.5 rounded-full bg-primary" title="今日" />
+                  ) : null}
+
+                  {/* 分数表示 */}
+                  {calendarView === 'month' && hasRecord && cellMins > 0 && !isSelected && (
+                    <span className="text-[11px] tabular-nums text-muted font-bold leading-tight mt-0.5">
+                      {cellMins}分
+                    </span>
+                  )}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* 凡例（Lucide アイコンのピル型バッジ） */}
+        <div className={ui.calendarLegend}>
+          <div className={ui.legendPill}>
+            <TeacherCheckIcon size={16} />
+            <span>先生の確認済み</span>
+          </div>
+          <div className={ui.legendPill}>
+            <RecordSeal size={15} />
+            <span>勉強した日</span>
+          </div>
+          <div className={ui.legendPill}>
+            <span className="size-2 rounded-full bg-primary inline-block" />
+            <span>今日</span>
+          </div>
         </div>
       </section>
 
-      {/* 生徒向けモチベーションバー */}
+      <div className={ui.weekSummary} aria-label={`${monthLabel(currentMonth)}の学習まとめ`}>
+        <span>
+          <small>記録した日</small>
+          <strong>{dataReady ? <>{monthRecordedDays}<span className="ml-1 text-xs font-normal text-muted">日</span></> : '—'}</strong>
+        </span>
+        <span>
+          <small>確認済み</small>
+          <strong>{dataReady ? <>{monthReviewedCount}<span className="ml-1 text-xs font-normal text-muted">日</span></> : '—'}</strong>
+        </span>
+        <span>
+          <small>学習時間</small>
+          <strong>{dataReady ? <>{monthTotalMinutes}<span className="ml-1 text-xs font-normal text-muted">分</span></> : '—'}</strong>
+        </span>
+      </div>
+
       {role === '生徒' && dataReady && (
         <div className={ui.motivationCard}>
           <div className={ui.motivationHeading}>
@@ -499,120 +663,10 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
           </p>
         </div>
       )}
-
-      {/* カレンダーカード（公開レベルの質感） */}
-      <section className={ui.calendarCard} aria-label="月間カレンダー">
-        {/* 月切り替えヘッダー */}
-        <div className={ui.monthPicker}>
-          <button
-            type="button"
-            className={ui.monthNavBtn}
-            onClick={() => changeMonth(-1)}
-            aria-label="前の月"
-            title="前の月へ"
-          >
-            <ChevronLeft size={18} />
-          </button>
-          
-          <div className={ui.monthTitle}>
-            <Calendar size={18} className="text-primary" />
-            <span>{monthLabel(currentMonth)}</span>
-          </div>
-
-          <button
-            type="button"
-            className={ui.monthNavBtn}
-            onClick={() => changeMonth(1)}
-            aria-label="次の月"
-            title="次の月へ"
-          >
-            <ChevronRight size={18} />
-          </button>
-        </div>
-
-        {/* 曜日ヘッダー */}
-        <div className={ui.calendarWeekdays} aria-hidden="true">
-          <span>月</span>
-          <span>火</span>
-          <span>水</span>
-          <span>木</span>
-          <span>金</span>
-          <span className="text-[#2E5C8A] dark:text-[#8FA8D8]">土</span>
-          <span className="text-reward">日</span>
-        </div>
-
-        {/* 日付グリッド */}
-        <div className={ui.calendarGrid} role="grid" aria-label={`${monthLabel(currentMonth)}のカレンダー`}>
-          {calendarCells.map((cell) => {
-            const isSelected = cell.date === day;
-            const isToday = cell.date === today;
-            const isFuture = Boolean(today && cell.date > today);
-            const cellEntry = entries[cell.date];
-            const hasRecord = Boolean(cellEntry?.sessions?.length);
-            const isReviewed = Boolean(cellEntry?.review?.reviewedAt);
-            const cellMins = cellEntry?.sessions?.reduce((sum, s) => sum + (s.minutes || 0), 0) || 0;
-            const sessionCount = cellEntry?.sessions?.length || 0;
-            const isSat = cell.dayOfWeek === 6;
-            const isSun = cell.dayOfWeek === 0;
-
-            return (
-              <button
-                key={cell.date}
-                type="button"
-                disabled={!cell.isCurrentMonth}
-                className={`${ui.calendarCell} ${!cell.isCurrentMonth ? ui.calendarCellOtherMonth : ''} ${isSelected ? ui.calendarCellSelected : ''} ${isToday && !isSelected ? ui.calendarCellToday : ''} ${isFuture ? ui.calendarCellFuture : ''} ${hasRecord && !isSelected ? 'bg-reward-soft/35 border-reward/20' : ''}`}
-                onClick={() => {
-                  setSelectedDate(cell.date);
-                  setShowPastComposer(false);
-                }}
-                aria-selected={isSelected}
-                aria-label={`${formatDate(cell.date)}${hasRecord ? `、記録${sessionCount}件` : ''}${isReviewed ? '、先生の確認あり' : ''}`}
-              >
-                {/* 日付の数字 */}
-                <span className={`${ui.calendarDayNum} ${isSat && !isSelected ? 'text-[#2E5C8A] dark:text-[#8FA8D8]' : ''} ${isSun && !isSelected ? 'text-reward' : ''}`}>
-                  {cell.dayNumber}
-                </span>
-
-                {/* 記録マークエリア（Lucide Icons） */}
-                <div className={ui.calendarMarkerArea}>
-                  {isReviewed ? (
-                    <TeacherCheckIcon size={22} className={isSelected ? '!text-white [&_svg]:!fill-white/30 [&_svg]:!stroke-white' : ''} />
-                  ) : hasRecord ? (
-                    <RecordSeal size={18} className={isSelected ? '!bg-white !text-primary' : ''} />
-                  ) : isToday ? (
-                    <span className="today-dot size-1.5 rounded-full bg-primary" title="今日" />
-                  ) : null}
-
-                  {/* 分数表示 */}
-                  {hasRecord && cellMins > 0 && !isSelected && (
-                    <span className="text-[10px] tabular-nums text-muted font-bold leading-tight mt-0.5">
-                      {cellMins}分
-                    </span>
-                  )}
-                </div>
-              </button>
-            );
-          })}
-        </div>
-
-        {/* 凡例（Lucide アイコンのピル型バッジ） */}
-        <div className={ui.calendarLegend}>
-          <div className={ui.legendPill}>
-            <TeacherCheckIcon size={16} />
-            <span>先生の確認済み</span>
-          </div>
-          <div className={ui.legendPill}>
-            <RecordSeal size={15} />
-            <span>勉強した日</span>
-          </div>
-          <div className={ui.legendPill}>
-            <span className="size-2 rounded-full bg-primary inline-block" />
-            <span>今日</span>
-          </div>
-        </div>
-      </section>
+      </div>
 
       {/* 選択した日の勉強記録 */}
+      <div className={ui.dayDetails}>
       {role === '生徒' ? (
         <>
           {/* 過去日ですでに記録がある場合: 記録を一番上に表示 */}
@@ -631,7 +685,7 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
               </div>
 
               {/* 先生のフィードバック */}
-              {entry.review?.reviewedAt && (
+              {entry.review?.reviewedAt && entry.review.comment && (
                 <div className={`${ui.reviewReceived} mt-0 mb-4 border border-reward/25`}>
                   <div className="flex items-center justify-between gap-2 mb-2">
                     <span className="font-extrabold flex items-center gap-1.5 text-sm text-reward-ink">
@@ -641,14 +695,7 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
                       {entry.review.reviewedAt ? new Intl.DateTimeFormat('ja-JP', { timeZone: 'Asia/Tokyo', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date(entry.review.reviewedAt)) : ''}
                     </span>
                   </div>
-                  <div className="my-2 flex items-center gap-3">
-                    <TeacherCheckIcon size={28} />
-                    <span className={entry.review.stamp === 'よくできました' ? "hanko-badge hanko-flower" : "hanko-badge"}>
-                      <span className="inline-flex items-center mr-1">{getStampIcon(entry.review.stamp, 18)}</span>
-                      {entry.review.stamp}
-                    </span>
-                  </div>
-                  {entry.review.comment && <p className="mt-2 leading-relaxed text-sm text-ink">{entry.review.comment}</p>}
+                  <p className="mt-2 leading-relaxed text-sm text-ink">{entry.review.comment}</p>
                 </div>
               )}
 
@@ -813,21 +860,14 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
             </section>
           )}
 
-          {day && entry.review?.reviewedAt && day === today && (
+          {day && entry.review?.reviewedAt && entry.review.comment && day === today && (
             <section className={ui.reviewReceived}>
               <div className="flex items-center justify-between gap-2 mb-2">
                 <span className="font-extrabold flex items-center gap-1.5 text-sm text-reward-ink">
                   <MessageCircle size={16} />先生からのフィードバック
                 </span>
               </div>
-              <div className="my-2 flex items-center gap-3">
-                <TeacherCheckIcon size={28} />
-                <span className={entry.review.stamp === 'よくできました' ? "hanko-badge hanko-flower" : "hanko-badge"}>
-                  <span className="inline-flex items-center mr-1">{getStampIcon(entry.review.stamp, 18)}</span>
-                  {entry.review.stamp}
-                </span>
-              </div>
-              {entry.review.comment && <p className="mt-3 leading-relaxed">{entry.review.comment}</p>}
+              <p className="mt-3 leading-relaxed">{entry.review.comment}</p>
             </section>
           )}
         </>
@@ -859,42 +899,21 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
           {sessions.length > 0 && (
             <section className={ui.panel}>
               <div className={ui.panelHeading}>
-                <div><h2>ひとこと返信</h2><p>取り組みを見た感想を返しましょう。</p></div>
-                {savedReview.reviewedAt && <span className={ui.statusPill}>返信済み</span>}
+                <div><h2>ひとこと返信</h2></div>
+                <span className={ui.statusPill} role="status" aria-live="polite">
+                  {reviewHasChanges ? '未保存の変更' : savedReview.reviewedAt ? (savedReview.comment?.trim() ? '返信は保存済み' : '確認済み') : '未保存'}
+                </span>
               </div>
-              <div className={ui.stamps} role="group" aria-label="励ましのスタンプ">
-                {stamps.map((stamp) => {
-                  const isGreat = stamp === 'よくできました';
-                  const isPressed = reviewDraft.stamp === stamp;
-                  const extraClass = isGreat
-                    ? (isPressed ? '!border-reward !bg-reward !text-white' : '!border-reward !bg-reward-soft !text-reward-ink')
-                    : (isPressed ? '!border-primary !bg-primary !text-white' : '');
-                  const stampClass = stamp === 'よくできました' ? 'stamp-great' : stamp === 'ていねいです' ? 'stamp-neat' : 'stamp-checked';
-                  return (
-                    <button
-                      type="button"
-                      key={stamp}
-                      className={`${stampClass} ${extraClass}`}
-                      aria-pressed={isPressed}
-                      disabled={!dataReady || saving}
-                      onClick={() => setReviewDrafts((current) => ({ ...current, [day]: { ...reviewDraft, stamp } }))}
-                    >
-                      <span className="mr-1.5 inline-flex items-center">
-                        {getStampIcon(stamp, 18)}
-                      </span>
-                      {stamp}
-                    </button>
-                  );
-                })}
-              </div>
-              <label className={ui.fieldLabel} htmlFor="teacher-comment">一言コメント</label>
+              <label className={ui.fieldLabel} htmlFor="teacher-comment">返信コメント（任意）</label>
               <textarea id="teacher-comment" className={ui.commentBox} rows={3} maxLength={120} value={reviewDraft.comment} disabled={!dataReady || saving} onChange={(event) => setReviewDrafts((current) => ({ ...current, [day]: { ...reviewDraft, comment: event.target.value } }))} placeholder="がんばったところを伝えましょう" />
               <small className={ui.characterCount}>{reviewDraft.comment.length}/120文字</small>
-              <button type="button" className={ui.primaryButton} disabled={!dataReady || saving} onClick={() => void saveReview()}><Check size={16} />{saving ? '保存中…' : '返信を保存'}</button>
+              <button type="button" className={ui.primaryButton} disabled={!dataReady || saving || !reviewCanSave} onClick={() => void saveReview()}><Check size={16} />{saving ? '保存中…' : reviewCanSave ? (reviewDraft.comment.trim() ? '返信を保存' : '確認済みにする') : (reviewDraft.comment.trim() ? '保存済み' : '確認済み')}</button>
             </section>
           )}
         </>
       )}
+      </div>
+      </div>
 
       {/* 写真拡大モーダル */}
       {previewImage && (
@@ -932,6 +951,7 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
 
       {loading && <p className={ui.feedback} role="status">記録を読み込んでいます…</p>}
       {error && <p className={ui.error} role="alert">{error}</p>}
+      {teacherSearchError && <p className={ui.error} role="alert">{teacherSearchError}</p>}
       {notice && <p className={ui.notice} role="status">{notice}</p>}
     </main>
   );
