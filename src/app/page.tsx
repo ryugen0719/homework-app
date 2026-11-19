@@ -6,10 +6,12 @@ import { upload } from '@vercel/blob/client';
 import {
   Award,
   BadgeCheck,
+  BarChart3,
   Calendar,
   Check,
   ChevronLeft,
   ChevronRight,
+  Clock,
   Flame,
   ImagePlus,
   MessageCircle,
@@ -24,6 +26,8 @@ import {
 } from 'lucide-react';
 import { FiBookOpen } from 'react-icons/fi';
 import { ui } from './ui';
+import TimelineView from './TimelineView';
+import StatsView from './StatsView';
 
 type StudySession = { id: string; content: string; minutes?: number; evidencePath?: string; createdAt?: string; updatedAt?: string };
 type Review = { comment?: string; reviewedAt?: string };
@@ -155,6 +159,9 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
   const [selectedDate, setSelectedDate] = useState('');
   const teacherManuallyNavigated = useRef(false);
   const [calendarView, setCalendarView] = useState<'week' | 'month'>('week');
+  const [activeTab, setActiveTab] = useState<'calendar' | 'timeline' | 'stats'>('calendar');
+  const [hasLoadedAll, setHasLoadedAll] = useState(false);
+  const [loadingAll, setLoadingAll] = useState(false);
   const day = selectedDate || today || '';
 
   const [entries, setEntries] = useState<Record<string, DayEntry>>({});
@@ -272,6 +279,19 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
     return item.comment !== (saved.comment || '');
   });
 
+  // 先生用: 未確認の提出日一覧（未返信キュー）
+  const unreviewedDates = useMemo(() => {
+    if (role !== '先生' || !dataReady) return [];
+    return Object.values(entries)
+      .filter((d) => (d?.sessions?.length || 0) > 0 && !d?.review?.reviewedAt)
+      .map((d) => ({
+        date: d.date,
+        count: d.sessions.length,
+        minutes: d.sessions.reduce((sum, s) => sum + (s.minutes || 0), 0),
+      }))
+      .sort((a, b) => b.date.localeCompare(a.date));
+  }, [entries, role, dataReady]);
+
   // 月データのフェッチ
   useEffect(() => {
     if (!token || !currentMonth) return;
@@ -368,6 +388,36 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
   function updateDay(date: string, patch: Partial<DayEntry>) {
     setEntries((current) => ({ ...current, [date]: { ...blankEntry(date), ...current[date], ...patch } }));
   }
+
+  const loadAllData = async () => {
+    if (!token || loadingAll || hasLoadedAll) return;
+    setLoadingAll(true);
+    try {
+      const res = await fetch('/api/entries?all=true', {
+        headers: { 'x-app-token': token },
+        cache: 'no-store',
+      });
+      if (!res.ok) throw new Error();
+      const data = (await res.json()) as { entries?: Record<string, DayEntry> };
+      if (data.entries) {
+        setEntries((current) => ({ ...current, ...data.entries }));
+        setHasLoadedAll(true);
+      }
+    } catch {
+      // ignore
+    } finally {
+      setLoadingAll(false);
+    }
+  };
+
+  function handleTimelineSelectDate(targetDate: string) {
+    teacherManuallyNavigated.current = true;
+    setSelectedMonth(targetDate.slice(0, 7));
+    setSelectedDate(targetDate);
+    setActiveTab('calendar');
+    setShowPastComposer(false);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
   function updateDraft(patch: Partial<Draft>) {
     setDrafts((current) => ({ ...current, [day]: { ...(current[day] || { id: '', content: '', minutes: '' }), ...patch } }));
   }
@@ -444,13 +494,32 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
   return (
     <main className={`shell ${ui.shell} bg-canvas text-ink`}>
       <header className={ui.header}>
-        <div className={ui.brand}>
-          <div className="flex items-center gap-2">
-            <span className={ui.brandIcon}>
-              <FiBookOpen size={20} aria-hidden="true" />
-            </span>
-            <p>宿題ノート／{role}用</p>
+        <div className="flex items-center gap-3">
+          <span className={ui.brandIcon}>
+            <FiBookOpen size={20} aria-hidden="true" />
+          </span>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="font-extrabold text-base tracking-tight text-ink">宿題ノート</span>
+              <span className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-card-subtle border border-line text-muted">
+                {role}用
+              </span>
+            </div>
           </div>
+        </div>
+
+        <div className="flex items-center gap-2">
+          {today && (day !== today || currentMonth !== today.slice(0, 7)) && (
+            <button
+              type="button"
+              className={ui.todayBadgeBtn}
+              onClick={goToToday}
+              title="今日の日付に戻る"
+            >
+              <RotateCcw size={13} />
+              <span>今日へ戻る</span>
+            </button>
+          )}
           <button
             type="button"
             className={ui.themeToggle}
@@ -458,59 +527,137 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
             aria-label={theme === 'dark' ? 'ライトモードに切り替え' : 'ダークモードに切り替え'}
             title={theme === 'dark' ? 'ライトモードに切り替え' : 'ダークモードに切り替え'}
           >
-            {theme === 'dark' ? <Sun size={19} /> : <Moon size={19} />}
+            {theme === 'dark' ? <Sun size={17} /> : <Moon size={17} />}
           </button>
         </div>
-        {today && (day !== today || currentMonth !== today.slice(0, 7)) && (
-          <button
-            type="button"
-            className={ui.todayBadgeBtn}
-            onClick={goToToday}
-            title="今日の日付に戻る"
-          >
-            <RotateCcw size={13} />
-            今日へ戻る
-          </button>
-        )}
       </header>
 
       {/* サマリー＆モチベーション */}
       <section className={role === '先生' ? ui.teacherIntro : `${ui.intro} ${ui.introCompact}`}>
-        <h1 className={ui.pageTitle}>{role === '先生' ? '学習記録を確認' : '今日の学びを記録しよう'}</h1>
+        <h1 className={ui.pageTitle}>{role === '先生' ? '学習記録を確認' : '日々の学びを記録・振り返り'}</h1>
         <p className={ui.pageDescription}>
-          {role === '先生' ? '未確認は古い日から表示。コメントなしでも確認できます。' : '今月の記録をまとめて、先生と振り返ります。'}
+          {role === '先生'
+            ? '提出された勉強記録を日ごとに確認し、スタンプやアドバイスを届けます。'
+            : '勉強した内容を記録して、先生と一緒に学習習慣を身につけましょう。'}
         </p>
       </section>
 
-      <div className={ui.workspaceGrid}>
+      {/* ビュー切り替えタブ */}
+      <div className={ui.tabBar} role="tablist" aria-label="表示モードの切り替え">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === 'calendar'}
+          className={`${ui.tabBtn} ${activeTab === 'calendar' ? ui.tabBtnActive : ''}`}
+          onClick={() => setActiveTab('calendar')}
+        >
+          <Calendar size={15} />
+          <span className="hidden sm:inline">カレンダー</span><span className="sm:hidden">記録</span>
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === 'timeline'}
+          className={`${ui.tabBtn} ${activeTab === 'timeline' ? ui.tabBtnActive : ''}`}
+          onClick={() => {
+            setActiveTab('timeline');
+            if (!hasLoadedAll) void loadAllData();
+          }}
+        >
+          <Clock size={15} />
+          <span className="hidden sm:inline">タイムライン</span><span className="sm:hidden">一覧</span>
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === 'stats'}
+          className={`${ui.tabBtn} ${activeTab === 'stats' ? ui.tabBtnActive : ''}`}
+          onClick={() => {
+            setActiveTab('stats');
+            if (!hasLoadedAll) void loadAllData();
+          }}
+        >
+          <BarChart3 size={15} />
+          <span>統計</span>
+        </button>
+      </div>
+
+      {activeTab === 'calendar' && (
+      <div className="flex flex-col gap-6 w-full">
+        {/* 先生専用: 未確認の提出フィード（ToDoキュー） */}
+        {role === '先生' && dataReady && (
+          <section className="rounded-2xl border border-line bg-card p-4 sm:p-5 shadow-card">
+            <div className="flex items-center justify-between gap-2 mb-2.5">
+              <div className="flex items-center gap-2">
+                <span className="flex size-7 items-center justify-center rounded-lg bg-amber-500/10 text-amber-600 dark:text-amber-400">
+                  <Clock size={15} />
+                </span>
+                <h3 className="text-sm font-bold text-ink m-0">未確認の学習記録</h3>
+              </div>
+              <span className={`text-xs font-bold px-2.5 py-0.5 rounded-full font-numbers ${unreviewedDates.length > 0 ? 'bg-amber-500/15 text-amber-800 dark:text-amber-300 border border-amber-500/30' : 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400'}`}>
+                {unreviewedDates.length > 0 ? `${unreviewedDates.length}件の要確認` : 'すべて確認済み ✓'}
+              </span>
+            </div>
+
+            {unreviewedDates.length > 0 ? (
+              <div className="flex flex-wrap gap-2 pt-1">
+                {unreviewedDates.map((item) => (
+                  <button
+                    key={item.date}
+                    type="button"
+                    onClick={() => {
+                      teacherManuallyNavigated.current = true;
+                      setSelectedMonth(item.date.slice(0, 7));
+                      setSelectedDate(item.date);
+                    }}
+                    className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-bold transition-all border ${day === item.date ? 'bg-primary text-white border-primary shadow-subtle' : 'bg-card hover:bg-card-subtle text-ink border-line'}`}
+                  >
+                    <span>{formatDate(item.date)}</span>
+                    <span className={`px-1.5 py-0.2 rounded-md text-[10px] font-numbers ${day === item.date ? 'bg-white/20 text-white' : 'bg-card-subtle text-muted'}`}>
+                      {item.count}件{item.minutes > 0 ? `・${item.minutes}分` : ''}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <p className="text-xs text-muted m-0 leading-relaxed">
+                提出された勉強記録はすべて確認・返信済みです。いつも温かいサポートをありがとうございます！
+              </p>
+            )}
+          </section>
+        )}
+
+        <div className={ui.workspaceGrid}>
       <div className={ui.calendarColumn}>
       <section className={ui.calendarCard} aria-label={calendarView === 'week' ? '週間カレンダー' : '月間カレンダー'}>
         {/* 表示範囲のヘッダー */}
         <div className={ui.monthPicker}>
-          <button
-            type="button"
-            className={ui.monthNavBtn}
-            onClick={() => changeCalendarRange(-1)}
-            aria-label={calendarView === 'week' ? '前の週' : '前の月'}
-            title={calendarView === 'week' ? '前の週へ' : '前の月へ'}
-          >
-            <ChevronLeft size={18} />
-          </button>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              className={ui.monthNavBtn}
+              onClick={() => changeCalendarRange(-1)}
+              aria-label={calendarView === 'week' ? '前の週' : '前の月'}
+              title={calendarView === 'week' ? '前の週へ' : '前の月へ'}
+            >
+              <ChevronLeft size={16} />
+            </button>
+            <button
+              type="button"
+              className={ui.monthNavBtn}
+              onClick={() => changeCalendarRange(1)}
+              aria-label={calendarView === 'week' ? '次の週' : '次の月'}
+              title={calendarView === 'week' ? '次の週へ' : '次の月へ'}
+            >
+              <ChevronRight size={16} />
+            </button>
+          </div>
           
           <div className={ui.monthTitle} title={calendarLabel}>
-            <Calendar size={18} className="text-primary" />
+            <Calendar size={15} className="text-primary" />
             <span>{calendarRangeLabel}</span>
           </div>
 
-          <button
-            type="button"
-            className={ui.monthNavBtn}
-            onClick={() => changeCalendarRange(1)}
-            aria-label={calendarView === 'week' ? '次の週' : '次の月'}
-            title={calendarView === 'week' ? '次の週へ' : '次の月へ'}
-          >
-            <ChevronRight size={18} />
-          </button>
           <button
             type="button"
             className={ui.calendarViewToggle}
@@ -520,7 +667,7 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
             aria-label={calendarView === 'week' ? '月全体を見る' : '週間表示に戻る'}
             title={calendarView === 'week' ? '月全体を見る' : '週間表示に戻る'}
           >
-            {calendarView === 'week' ? '月' : '週'}
+            <span>{calendarView === 'week' ? '月' : '週'}</span>
           </button>
         </div>
 
@@ -914,6 +1061,32 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
       )}
       </div>
       </div>
+      </div>
+      )}
+
+      {/* タイムラインビュー */}
+      {activeTab === 'timeline' && (
+        <TimelineView
+          entries={entries}
+          role={role}
+          token={token}
+          today={today}
+          onSelectDate={handleTimelineSelectDate}
+          onOpenPreview={(src, label) => setPreviewImage({ src, label })}
+          onRequestAllData={loadAllData}
+          hasLoadedAll={hasLoadedAll}
+        />
+      )}
+
+      {/* 勉強統計ビュー */}
+      {activeTab === 'stats' && (
+        <StatsView
+          entries={entries}
+          today={today}
+          onRequestAllData={loadAllData}
+          hasLoadedAll={hasLoadedAll}
+        />
+      )}
 
       {/* 写真拡大モーダル */}
       {previewImage && (

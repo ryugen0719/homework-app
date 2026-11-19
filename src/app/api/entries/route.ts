@@ -27,6 +27,27 @@ export async function GET(request: Request) {
     const month = url.searchParams.get('month');
     const weekStart = url.searchParams.get('weekStart');
     const oldestUnreviewed = url.searchParams.get('oldestUnreviewed');
+    const all = url.searchParams.get('all');
+
+    if (all === 'true') {
+      const snapshots = await db.collection('days').get();
+      const entries = Object.fromEntries(snapshots.docs.flatMap((snapshot) => {
+        if (!validDate(snapshot.id)) return [];
+        const data = snapshot.data() || {};
+        const sessions = sessionsFromDay(data);
+        const rawReview = data.review && typeof data.review === 'object' ? data.review as Payload : {};
+        const review = typeof rawReview.comment === 'string'
+          && typeof rawReview.reviewedAt === 'string'
+          ? { comment: rawReview.comment, reviewedAt: rawReview.reviewedAt }
+          : undefined;
+        return [[snapshot.id, {
+          date: snapshot.id,
+          sessions,
+          ...(sessions.length && review ? { review } : {}),
+        }]];
+      }));
+      return NextResponse.json({ entries }, { headers: { 'Cache-Control': 'no-store' } });
+    }
 
     if (oldestUnreviewed !== null) {
       if (role !== 'teacher') return respond('この操作はできません', 403);
