@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from 'next';
+import { Toaster } from 'sonner';
 import './globals.css';
 export const metadata: Metadata = {
   title: '宿題ノート',
@@ -18,7 +19,15 @@ export default function RootLayout({ children }: LayoutProps<'/'>) {
           }}
         />
       </head>
-      <body>{children}</body>
+      <body>
+        {children}
+        <Toaster
+          position="bottom-center"
+          toastOptions={{
+            className: '!rounded-xl !border !border-line !bg-card !text-ink !shadow-card !font-sans !text-xs sm:!text-sm !font-semibold',
+          }}
+        />
+      </body>
     </html>
   );
 }

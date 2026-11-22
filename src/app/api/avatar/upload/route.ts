@@ -54,14 +54,18 @@ export async function POST(request: Request) {
     const ext = file.type === 'image/png' ? 'png' : file.type === 'image/webp' ? 'webp' : file.type === 'image/gif' ? 'gif' : 'jpg';
     const filename = `avatars/${targetStudentId}-${Date.now()}.${ext}`;
 
-    // Vercel Blob へパブリックアクセスで保存
-    const blob = await put(filename, file, { access: 'public' });
+    // Vercel Blob（private ストア）へ保存し、アプリ内配信プロキシURLを組み立てる
+    const blob = await put(filename, file, {
+      access: 'private',
+      contentType: file.type,
+    });
+    const avatarUrl = `/api/avatar?pathname=${encodeURIComponent(blob.pathname)}`;
 
     // Firestore の生徒ドキュメントを更新
     const studentRef = db.collection('students').doc(targetStudentId);
     await studentRef.set(
       {
-        avatarUrl: blob.url,
+        avatarUrl,
         updatedAt: new Date().toISOString(),
       },
       { merge: true }
@@ -74,7 +78,7 @@ export async function POST(request: Request) {
         const memberRef = gDoc.ref.collection('members').doc(targetStudentId);
         const memberDoc = await memberRef.get();
         if (memberDoc.exists) {
-          await memberRef.set({ avatarUrl: blob.url }, { merge: true });
+          await memberRef.set({ avatarUrl }, { merge: true });
         }
       }
     } catch {
@@ -83,7 +87,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       ok: true,
-      avatarUrl: blob.url,
+      avatarUrl,
       studentId: targetStudentId,
     }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (err) {

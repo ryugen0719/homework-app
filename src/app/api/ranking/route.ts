@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import crypto from 'node:crypto';
+import { FieldPath } from 'firebase-admin/firestore';
 import {
   authenticate,
   calculateWeeklyPoints,
   database,
   ensureDefaultStudent,
   MAX_MEMBERS_PER_GROUP,
+  offsetDateJst,
   sessionsFromDay,
   weekStartFor,
 } from '../../../lib/homework-server';
@@ -124,56 +126,72 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // 各メンバーの週次ポイント集計
+    // 各メンバーの週次ポイント集計（Promise.allで完全並列取得 + 直近90日分に絞って高速化）
     // ※ プライバシー境界: 学習内容や写真、コメントは一切含めず、週の分数と継続ボーナスのみを集計する
-    const rankingList = [];
+    const historyStartDate = offsetDateJst(targetWeekStart, -90);
+    const historyEndDate = offsetDateJst(targetWeekStart, 6);
 
-    for (const member of members) {
-      if (member.status === 'suspended') continue;
+    const activeMembers = members.filter((m) => m.status !== 'suspended');
 
-      // 生徒ドキュメントから最新のオプトアウトと表示設定を取得
-      const sDoc = await db.collection('students').doc(member.studentId).get();
-      const sData = sDoc.exists ? sDoc.data() || {} : {};
-      const isOptedOut = Boolean(sData.rankingOptOut);
+    const memberResults = await Promise.all(
+      activeMembers.map(async (member) => {
+        const studentRef = db.collection('students').doc(member.studentId);
+        const daysQuery = studentRef
+          .collection('days')
+          .where(FieldPath.documentId(), '>=', historyStartDate)
+          .where(FieldPath.documentId(), '<=', historyEndDate);
 
-      // 他の生徒がオプトアウトしている場合はランキングに含めない
-      if (isOptedOut && member.studentId !== currentStudentId) {
-        continue;
-      }
+        // 生徒情報と学習日ドキュメントを同時並列取得
+        const [sDoc, daysSnapshot] = await Promise.all([
+          studentRef.get(),
+          daysQuery.get(),
+        ]);
 
-      // 学習セッション履歴の読み込み
-      const history: Record<string, ReturnType<typeof sessionsFromDay>> = {};
-      const daysSnapshot = await db.collection('students').doc(member.studentId).collection('days').get();
-      
-      for (const dayDoc of daysSnapshot.docs) {
-        history[dayDoc.id] = sessionsFromDay(dayDoc.data() || {});
-      }
+        const sData = sDoc.exists ? sDoc.data() || {} : {};
+        const isOptedOut = Boolean(sData.rankingOptOut);
 
-      // default-student かつ旧コレクションにデータがある場合のフォールバック
-      if (member.studentId === 'default-student' && Object.keys(history).length === 0) {
-        const oldDaysSnapshot = await db.collection('days').get();
-        for (const dayDoc of oldDaysSnapshot.docs) {
+        // 他の生徒がオプトアウトしている場合はランキングに含めない
+        if (isOptedOut && member.studentId !== currentStudentId) {
+          return null;
+        }
+
+        const history: Record<string, ReturnType<typeof sessionsFromDay>> = {};
+        for (const dayDoc of daysSnapshot.docs) {
           history[dayDoc.id] = sessionsFromDay(dayDoc.data() || {});
         }
-      }
 
-      const pointsSummary = calculateWeeklyPoints(history, targetWeekStart);
+        // default-student かつ新コレクションが空の場合のみ旧コレクションへフォールバック
+        if (member.studentId === 'default-student' && Object.keys(history).length === 0) {
+          const oldDaysSnapshot = await db
+            .collection('days')
+            .where(FieldPath.documentId(), '>=', historyStartDate)
+            .where(FieldPath.documentId(), '<=', historyEndDate)
+            .get();
+          for (const dayDoc of oldDaysSnapshot.docs) {
+            history[dayDoc.id] = sessionsFromDay(dayDoc.data() || {});
+          }
+        }
 
-      rankingList.push({
-        studentId: member.studentId,
-        displayName: sData.displayName || member.displayName,
-        color: sData.color || member.color,
-        icon: sData.icon || member.icon,
-        avatarUrl: sData.avatarUrl || '',
-        weekMinutes: pointsSummary.weekMinutes,
-        weekStreakBonus: pointsSummary.weekStreakBonus,
-        weekPhotoBonus: pointsSummary.weekPhotoBonus,
-        weekPoints: pointsSummary.weekPoints,
-        currentStreak: pointsSummary.currentStreak,
-        isMe: auth.role === 'student' && member.studentId === auth.studentId,
-        isOptedOut: isOptedOut,
-      });
-    }
+        const pointsSummary = calculateWeeklyPoints(history, targetWeekStart);
+
+        return {
+          studentId: member.studentId,
+          displayName: sData.displayName || member.displayName,
+          color: sData.color || member.color,
+          icon: sData.icon || member.icon,
+          avatarUrl: sData.avatarUrl || '',
+          weekMinutes: pointsSummary.weekMinutes,
+          weekStreakBonus: pointsSummary.weekStreakBonus,
+          weekPhotoBonus: pointsSummary.weekPhotoBonus,
+          weekPoints: pointsSummary.weekPoints,
+          currentStreak: pointsSummary.currentStreak,
+          isMe: auth.role === 'student' && member.studentId === auth.studentId,
+          isOptedOut,
+        };
+      })
+    );
+
+    const rankingList = memberResults.filter((item): item is NonNullable<typeof item> => item !== null);
 
     // ポイント順にソート (降順)
     rankingList.sort((a, b) => b.weekPoints - a.weekPoints);

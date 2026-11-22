@@ -1,6 +1,6 @@
 export const ui = {
   shell: 'mx-auto min-h-screen w-full max-w-[1140px] px-3.5 sm:px-6 pb-20 pt-4 sm:pt-6 text-ink overflow-x-clip [&_svg]:shrink-0 [&_button]:font-medium [&_button:disabled]:cursor-default [&_button:disabled]:opacity-45 [&_button]:[-webkit-tap-highlight-color:transparent] [&_button:focus-visible]:outline-primary [&_button:focus-visible]:outline-offset-2',
-  header: 'flex min-h-12 items-center justify-between gap-4 mb-6 pb-4 border-b border-line/60',
+  header: 'flex min-h-12 flex-wrap items-center justify-between gap-x-2 gap-y-2.5 mb-5 sm:mb-6 pb-3.5 sm:pb-4 border-b border-line/60',
   brand: 'brand flex items-center gap-3 [&_p]:m-0 [&_p]:text-sm [&_p]:font-bold [&_p]:tracking-tight text-ink',
   brandIcon: 'brand-icon grid size-9 shrink-0 place-items-center rounded-xl bg-primary text-white shadow-subtle transition-transform hover:scale-105 [&_svg]:size-5 [&_svg]:stroke-[2]',
   themeToggle: 'themeToggle grid size-9 shrink-0 place-items-center rounded-xl border border-line bg-card text-muted transition-all hover:border-line-strong hover:bg-card-subtle hover:text-ink disabled:opacity-40 [&_svg]:size-4 [&_svg]:stroke-[1.8]',

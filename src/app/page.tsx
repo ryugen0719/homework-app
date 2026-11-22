@@ -3,6 +3,8 @@
 
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { upload } from '@vercel/blob/client';
+import { toast } from 'sonner';
+import confetti from 'canvas-confetti';
 import {
   BadgeCheck,
   BarChart3,
@@ -43,6 +45,7 @@ import StudentAvatar, {
   STUDENT_ICON_OPTIONS,
 } from '../components/StudentAvatar';
 import ProfileModal from '../components/ProfileModal';
+import ImageCropModal from '../components/ImageCropModal';
 
 type StudySession = { id: string; content: string; minutes?: number; evidencePath?: string; createdAt?: string; updatedAt?: string };
 type Review = { comment?: string; reviewedAt?: string };
@@ -84,6 +87,16 @@ const getAuthSnapshot = () => {
 const subscribeAuth = (callback: () => void) => {
   window.addEventListener('storage', callback);
   return () => window.removeEventListener('storage', callback);
+};
+const subscribeDesktop = (callback: () => void) => {
+  if (typeof window === 'undefined') return () => {};
+  const mq = window.matchMedia('(min-width: 1024px)');
+  mq.addEventListener('change', callback);
+  return () => mq.removeEventListener('change', callback);
+};
+const getDesktopSnapshot = () => {
+  if (typeof window === 'undefined') return false;
+  return window.matchMedia('(min-width: 1024px)').matches;
 };
 const todayJst = () => new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Tokyo' }).format(new Date());
 const dateAtJst = (date: string) => new Date(`${date}T12:00:00+09:00`);
@@ -263,7 +276,9 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
   // 選択中の日付（YYYY-MM-DD）
   const [selectedDate, setSelectedDate] = useState('');
   const teacherManuallyNavigated = useRef(false);
-  const [calendarView, setCalendarView] = useState<'week' | 'month'>('week');
+  const isDesktop = useSyncExternalStore(subscribeDesktop, getDesktopSnapshot, () => true);
+  const [calendarViewOverride, setCalendarView] = useState<'week' | 'month' | null>(null);
+  const calendarView = calendarViewOverride ?? (isDesktop ? 'month' : 'week');
   const [activeTab, setActiveTab] = useState<'calendar' | 'timeline' | 'ranking' | 'stats'>('calendar');
   const [hasLoadedAll, setHasLoadedAll] = useState(false);
   const [loadingAll, setLoadingAll] = useState(false);
@@ -276,10 +291,14 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [teacherSearchError, setTeacherSearchError] = useState('');
-  const [notice, setNotice] = useState('');
   const [uploading, setUploading] = useState('');
   const [uploadPercent, setUploadPercent] = useState(0);
   const [showPastComposer, setShowPastComposer] = useState(false);
+  const [cropTask, setCropTask] = useState<
+    | { mode: 'evidence'; file: File; session: StudySession }
+    | { mode: 'avatar'; file: File }
+    | null
+  >(null);
 
   // 生徒一覧の取得
   const fetchStudents = async () => {
@@ -639,7 +658,7 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
     setDrafts((current) => ({ ...current, [day]: { ...(current[day] || { id: '', content: '', minutes: '' }), ...patch } }));
   }
 
-  function notify(message: string) { setNotice(message); window.setTimeout(() => setNotice(''), 2400); }
+  function notify(message: string) { toast.success(message); }
 
   async function put(payload: Record<string, unknown>) {
     return fetch('/api/entries', {
@@ -672,7 +691,20 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
     if (!response?.ok) { setError('記録を保存できませんでした。入力は残っています。もう一度お試しください。'); setSaving(false); return; }
     updateDay(day, { sessions: existing ? sessions.map((item) => item.id === id ? next : item) : [...sessions, next] });
     setDrafts((current) => { const nextDrafts = { ...current }; delete nextDrafts[day]; return nextDrafts; });
-    setSaving(false); notify(existing ? '記録を更新しました' : '勉強を記録しました');
+    setSaving(false);
+    notify(existing ? '記録を更新しました' : '勉強を記録しました');
+
+    // 新規記録時の達成感演出（紙吹雪）
+    if (!existing && typeof window !== 'undefined' && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      void confetti({
+        particleCount: 55,
+        spread: 68,
+        startVelocity: 32,
+        origin: { y: 0.72 },
+        colors: ['#0D5C52', '#14B8A6', '#F59E0B', '#38BDF8', '#10B981'],
+        disableForReducedMotion: true,
+      });
+    }
   }
 
   async function deleteSession(session: StudySession) {
@@ -929,7 +961,6 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
   if (authChecked && !token) {
     return (
       <div className={ui.shell}>
-        {notice && <div className={ui.notice} role="status" aria-live="polite">{notice}</div>}
         <header className={ui.header}>
           <div className="flex items-center gap-3">
             <span className="flex size-9 items-center justify-center rounded-xl bg-primary/10 text-primary">
@@ -964,35 +995,31 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
 
   return (
     <div className={ui.shell}>
-      {notice && <div className={ui.notice} role="status" aria-live="polite">{notice}</div>}
-
       {/* ヘッダー */}
       <header className={ui.header}>
-        <div className="flex items-center gap-3">
-          <span className="flex size-9 items-center justify-center rounded-xl bg-primary/10 text-primary">
-            <FiBookOpen size={20} aria-hidden="true" />
+        <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+          <span className="flex size-8 sm:size-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+            <FiBookOpen size={18} aria-hidden="true" />
           </span>
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="font-extrabold text-base tracking-tight text-ink">宿題ノート</span>
-              <span className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-card-subtle border border-line text-muted">
-                {role}用
-              </span>
-            </div>
+          <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
+            <span className="font-extrabold text-sm sm:text-base tracking-tight text-ink whitespace-nowrap">宿題ノート</span>
+            <span className="text-[10px] sm:text-[11px] font-bold px-1.5 sm:px-2 py-0.5 rounded-md bg-card-subtle border border-line text-muted shrink-0">
+              {role}用
+            </span>
           </div>
         </div>
 
         {/* 先生・生徒別のアカウント表示/切り替えUI */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5 sm:gap-2 ml-auto">
           {role === '先生' ? (
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5 sm:gap-2">
               {/* 先生用: 担当生徒切り替えセレクター */}
               {students.length > 0 && (
                 <div className="relative inline-flex items-center">
                   <select
                     value={selectedStudentId}
                     onChange={(e) => handleSelectStudent(e.target.value)}
-                    className="appearance-none pl-8 pr-7 py-1.5 rounded-xl text-xs font-bold border border-line bg-card hover:bg-card-subtle text-ink cursor-pointer focus:outline-none focus:border-primary shadow-subtle"
+                    className="appearance-none max-w-[132px] sm:max-w-[200px] truncate pl-7 sm:pl-8 pr-6 sm:pr-7 py-1.5 rounded-xl text-xs font-bold border border-line bg-card hover:bg-card-subtle text-ink cursor-pointer focus:outline-none focus:border-primary shadow-subtle"
                     title="担当生徒を切り替え"
                   >
                     {students.map((s) => (
@@ -1003,10 +1030,10 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
                   </select>
                   {/* カラーピル */}
                   <span
-                    className="absolute left-2.5 size-3 rounded-full pointer-events-none"
+                    className="absolute left-2.5 size-2.5 sm:size-3 rounded-full pointer-events-none"
                     style={{ backgroundColor: currentStudent?.color || '#0F6F65' }}
                   />
-                  <ChevronDown size={14} className="absolute right-2 text-muted pointer-events-none" />
+                  <ChevronDown size={13} className="absolute right-2 text-muted pointer-events-none" />
                 </div>
               )}
 
@@ -1014,32 +1041,34 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
               <button
                 type="button"
                 onClick={() => setStudentModalOpen(true)}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-xl bg-card border border-line hover:border-primary/50 text-ink hover:text-primary shadow-subtle transition-all cursor-pointer"
+                className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs font-bold rounded-xl bg-card border border-line hover:border-primary/50 text-ink hover:text-primary shadow-subtle transition-all cursor-pointer"
                 title="生徒の管理・追加"
+                aria-label="生徒管理"
               >
                 <Users size={15} className="text-primary" />
-                <span>生徒管理</span>
+                <span className="hidden sm:inline">生徒管理</span>
               </button>
 
               {/* 先生用ログアウトボタン */}
               <button
                 type="button"
                 onClick={handleLogout}
-                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold rounded-xl text-muted hover:text-ink hover:bg-card-subtle transition-all cursor-pointer"
+                className="inline-flex items-center gap-1.5 px-2 sm:px-2.5 py-1.5 text-xs font-semibold rounded-xl text-muted hover:text-ink hover:bg-card-subtle transition-all cursor-pointer"
                 title="ログアウト"
+                aria-label="ログアウト"
               >
-                <LogOut size={13} />
+                <LogOut size={14} />
                 <span className="hidden sm:inline">ログアウト</span>
               </button>
             </div>
           ) : (
             /* 生徒用: ログイン中表示（タップでアイコン設定）＆切り替え（ログアウト）ボタン */
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5 sm:gap-2">
               {currentStudent && (
                 <button
                   type="button"
                   onClick={() => setProfileModalOpen(true)}
-                  className="inline-flex items-center gap-2 pl-1.5 pr-3 py-1 rounded-full bg-card border border-line hover:border-primary/50 text-xs font-bold text-ink shadow-subtle transition-all cursor-pointer group"
+                  className="inline-flex items-center gap-1.5 sm:gap-2 pl-1 pr-2.5 sm:pl-1.5 sm:pr-3 py-1 rounded-full bg-card border border-line hover:border-primary/50 text-xs font-bold text-ink shadow-subtle transition-all cursor-pointer group max-w-[140px] sm:max-w-[200px]"
                   title="アイコンやカラーを設定"
                 >
                   <StudentAvatar
@@ -1050,17 +1079,18 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
                     size="xs"
                     shape="circle"
                   />
-                  <span>{currentStudent.displayName}</span>
-                  <PencilLine size={11} className="text-muted group-hover:text-primary transition-colors" />
+                  <span className="truncate">{currentStudent.displayName}</span>
+                  <PencilLine size={11} className="text-muted group-hover:text-primary transition-colors shrink-0" />
                 </button>
               )}
               <button
                 type="button"
                 onClick={handleLogout}
-                className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold rounded-xl text-muted hover:text-ink hover:bg-card-subtle transition-all cursor-pointer"
+                className="inline-flex items-center gap-1.5 px-2 sm:px-2.5 py-1.5 text-xs font-semibold rounded-xl text-muted hover:text-ink hover:bg-card-subtle transition-all cursor-pointer"
                 title="生徒を切り替える（ログアウト）"
+                aria-label="切り替え"
               >
-                <LogOut size={13} />
+                <LogOut size={14} />
                 <span className="hidden sm:inline">切り替え</span>
               </button>
             </div>
@@ -1347,23 +1377,23 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
                 </div>
 
                 {sessions.length > 0 ? (
-                  <div className={ui.sessionList}>
+                  <div className="divide-y divide-line/70 -mx-1">
                     {sessions.map((session, index) => (
                       <article
-                        className="rounded-2xl border border-line/80 bg-card-subtle/35 hover:bg-card-subtle/55 hover:border-line-strong p-4 transition-all"
+                        className="py-3.5 first:pt-1 last:pb-1 px-1 transition-colors"
                         key={session.id}
                       >
-                        <div className="flex items-center justify-between gap-2 mb-2">
+                        <div className="flex items-center justify-between gap-2 mb-1.5">
                           <div className="flex items-center gap-2">
                             <span
-                              className="grid size-6 place-items-center rounded-lg bg-reward-soft text-[11px] font-extrabold font-numbers text-reward-ink border border-reward-line/50"
+                              className="text-xs font-extrabold font-numbers text-muted"
                               aria-hidden="true"
                             >
-                              {index + 1}
+                              #{index + 1}
                             </span>
                             {session.minutes && (
-                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-card border border-line/70 text-xs font-bold font-numbers text-ink">
-                                <Clock size={11} className="text-primary" />
+                              <span className="inline-flex items-center gap-1 text-xs font-bold font-numbers text-primary-ink">
+                                <Clock size={12} />
                                 {session.minutes}分
                               </span>
                             )}
@@ -1373,7 +1403,7 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
                           {session.content}
                         </p>
                         {session.evidencePath && (
-                          <div className="mt-3">
+                          <div className="mt-2.5">
                             <EvidencePreview
                               key={session.evidencePath}
                               pathname={session.evidencePath}
@@ -1448,107 +1478,109 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
                   </div>
                 )}
 
-                {/* セッション一覧（洗練されたカード構成） */}
+                {/* セッション一覧（入れ子カードを廃したクリーンなノート行） */}
                 {sessions.length > 0 && (
-                  <div className={ui.sessionList}>
-                    {sessions.map((session, index) => {
-                      const hasAnyPhotoToday = sessions.some((s) => Boolean(s.evidencePath));
-                      return (
-                        <article
-                          className="group rounded-2xl border border-line/80 bg-card-subtle/35 hover:bg-card-subtle/55 hover:border-line-strong p-4 transition-all"
-                          key={session.id}
-                        >
-                          {/* 上段：番号・時間ピル ＋ 右上に控えめなアイコン操作 */}
-                          <div className="flex items-center justify-between gap-2 mb-2.5">
-                            <div className="flex items-center gap-2">
-                              <span
-                                className="grid size-6 place-items-center rounded-lg bg-reward-soft text-[11px] font-extrabold font-numbers text-reward-ink border border-reward-line/50"
-                                aria-hidden="true"
-                              >
-                                {index + 1}
+                  <div className="divide-y divide-line/70 -mx-1">
+                    {sessions.map((session, index) => (
+                      <article
+                        className="group py-3.5 first:pt-1 last:pb-1 px-1 transition-colors"
+                        key={session.id}
+                      >
+                        {/* 上段：番号・時間 ＋ 右上に控えめなアイコン操作 */}
+                        <div className="flex items-center justify-between gap-2 mb-1.5">
+                          <div className="flex items-center gap-2">
+                            <span
+                              className="text-xs font-extrabold font-numbers text-muted"
+                              aria-hidden="true"
+                            >
+                              #{index + 1}
+                            </span>
+                            {session.minutes && (
+                              <span className="inline-flex items-center gap-1 text-xs font-bold font-numbers text-primary-ink">
+                                <Clock size={12} />
+                                {session.minutes}分
                               </span>
-                              {session.minutes && (
-                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-card border border-line/70 text-xs font-bold font-numbers text-ink">
-                                  <Clock size={11} className="text-primary" />
-                                  {session.minutes}分
-                                </span>
-                              )}
-                            </div>
-
-                            <div className="flex items-center gap-1">
-                              <button
-                                type="button"
-                                disabled={!dataReady || saving || Boolean(uploading)}
-                                onClick={() => { setShowPastComposer(true); startEdit(session); }}
-                                className="grid size-7 place-items-center rounded-lg text-muted hover:text-ink hover:bg-card transition-colors cursor-pointer disabled:opacity-40"
-                                title="編集"
-                                aria-label="編集"
-                              >
-                                <PencilLine size={14} />
-                              </button>
-                              <button
-                                type="button"
-                                disabled={!dataReady || saving || Boolean(uploading)}
-                                onClick={() => void deleteSession(session)}
-                                className="grid size-7 place-items-center rounded-lg text-muted hover:text-danger hover:bg-error-soft transition-colors cursor-pointer disabled:opacity-40"
-                                title="削除"
-                                aria-label="削除"
-                              >
-                                <Trash2 size={14} />
-                              </button>
-                            </div>
+                            )}
                           </div>
 
-                          {/* 中段：主役の勉強内容テキスト */}
-                          <p className="m-0 text-sm sm:text-[15px] leading-relaxed text-ink whitespace-pre-wrap [overflow-wrap:anywhere]">
-                            {session.content}
-                          </p>
+                          <div className="flex items-center gap-0.5">
+                            <button
+                              type="button"
+                              disabled={!dataReady || saving || Boolean(uploading)}
+                              onClick={() => { setShowPastComposer(true); startEdit(session); }}
+                              className="grid size-7 place-items-center rounded-lg text-muted hover:text-ink hover:bg-card-subtle transition-colors cursor-pointer disabled:opacity-40"
+                              title="編集"
+                              aria-label="編集"
+                            >
+                              <PencilLine size={14} />
+                            </button>
+                            <button
+                              type="button"
+                              disabled={!dataReady || saving || Boolean(uploading)}
+                              onClick={() => void deleteSession(session)}
+                              className="grid size-7 place-items-center rounded-lg text-muted hover:text-danger hover:bg-error-soft transition-colors cursor-pointer disabled:opacity-40"
+                              title="削除"
+                              aria-label="削除"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        </div>
 
-                          {/* 下段：写真プレビューまたは写真追加チップ */}
-                          {(session.evidencePath || canAddPhoto) && (
-                            <div className="mt-3 flex flex-wrap items-center gap-2.5">
-                              {session.evidencePath && (
-                                <EvidencePreview
-                                  key={session.evidencePath}
-                                  pathname={session.evidencePath}
-                                  token={token}
-                                  label={session.content}
-                                  onOpenPreview={(src, label) => setPreviewImage({ src, label })}
+                        {/* 中段：主役の勉強内容テキスト */}
+                        <p className="m-0 text-sm sm:text-[15px] leading-relaxed text-ink whitespace-pre-wrap [overflow-wrap:anywhere]">
+                          {session.content}
+                        </p>
+
+                        {/* 下段：写真プレビューまたは写真追加ボタン */}
+                        {(session.evidencePath || canAddPhoto) && (
+                          <div className="mt-2.5 flex flex-wrap items-center gap-2.5">
+                            {session.evidencePath && (
+                              <EvidencePreview
+                                key={session.evidencePath}
+                                pathname={session.evidencePath}
+                                token={token}
+                                label={session.content}
+                                onOpenPreview={(src, label) => setPreviewImage({ src, label })}
+                              />
+                            )}
+                            {canAddPhoto && (
+                              <label className="relative inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-lg border border-line bg-card-subtle/50 hover:bg-card-subtle px-2.5 text-xs font-semibold text-muted hover:text-ink hover:border-line-strong transition-all">
+                                <Camera size={13} />
+                                <span>
+                                  {uploading === session.id
+                                    ? `送信中 ${uploadPercent}%`
+                                    : session.evidencePath
+                                    ? '写真を変更'
+                                    : '写真を追加'}
+                                </span>
+                                <input
+                                  type="file"
+                                  accept="image/jpeg,image/png,image/webp"
+                                  className="sr-only"
+                                  disabled={!dataReady || Boolean(uploading) || saving}
+                                  onChange={(event) => {
+                                    const file = event.target.files?.[0];
+                                    event.target.value = '';
+                                    if (!file) return;
+                                    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+                                      setError('JPG・PNG・WebP画像を選択してください。');
+                                      return;
+                                    }
+                                    if (file.size > 15 * 1024 * 1024) {
+                                      setError('画像サイズは15MB以下にしてください。');
+                                      return;
+                                    }
+                                    setError('');
+                                    setCropTask({ mode: 'evidence', file, session });
+                                  }}
                                 />
-                              )}
-                              {canAddPhoto && (
-                                <label className="relative inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-xl border border-line bg-card px-3 text-xs font-semibold text-ink hover:border-primary/50 hover:text-primary transition-all shadow-subtle">
-                                  <Camera size={13} className="text-primary" />
-                                  <span>
-                                    {uploading === session.id
-                                      ? `送信中 ${uploadPercent}%`
-                                      : session.evidencePath
-                                      ? '写真を変更'
-                                      : '写真を追加'}
-                                  </span>
-                                  {!hasAnyPhotoToday && !session.evidencePath && (
-                                    <span className="ml-0.5 px-1.5 py-0.5 rounded-md bg-primary-soft text-primary-ink text-[10px] font-bold font-numbers">
-                                      +5pt
-                                    </span>
-                                  )}
-                                  <input
-                                    type="file"
-                                    accept="image/jpeg,image/png,image/webp"
-                                    className="sr-only"
-                                    disabled={!dataReady || Boolean(uploading) || saving}
-                                    onChange={(event) => {
-                                      const file = event.target.files?.[0];
-                                      if (file) void uploadEvidence(session, file);
-                                      event.target.value = '';
-                                    }}
-                                  />
-                                </label>
-                              )}
-                            </div>
-                          )}
-                        </article>
-                      );
-                    })}
+                              </label>
+                            )}
+                          </div>
+                        )}
+                      </article>
+                    ))}
                   </div>
                 )}
 
@@ -1654,7 +1686,7 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
                               icon={saving ? <LoaderCircle size={15} className="animate-spin" /> : <Check size={16} strokeWidth={2.4} />}
                               doneIcon={<Check size={16} strokeWidth={2.6} />}
                               doneLabel={draft.id ? '保存しました' : '記録しました'}
-                              className="font-bold text-sm tracking-wide shadow-subtle hover:shadow-card cursor-pointer"
+                              className="w-full sm:w-auto font-bold text-sm tracking-wide shadow-subtle hover:shadow-card cursor-pointer"
                             >
                               {saving ? '保存中…' : draft.id ? '長押しで保存' : '長押しで記録'}
                             </HoldButton>
@@ -1715,7 +1747,6 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
           role={role}
           currentStudentId={selectedStudentId}
           refreshKey={profileRefreshKey}
-          onOpenProfile={role === '生徒' ? () => setProfileModalOpen(true) : undefined}
         />
       )}
 
@@ -1867,8 +1898,18 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
                                 disabled={uploadingTeacherAvatar}
                                 onChange={(e) => {
                                   const f = e.target.files?.[0];
-                                  if (f) void handleTeacherAvatarUpload(f);
                                   e.target.value = '';
+                                  if (!f) return;
+                                  if (!['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(f.type)) {
+                                    setStudentModalError('JPG・PNG・WebP・GIF形式の画像を選択してください');
+                                    return;
+                                  }
+                                  if (f.size > 15 * 1024 * 1024) {
+                                    setStudentModalError('画像サイズは15MB以下にしてください');
+                                    return;
+                                  }
+                                  setStudentModalError('');
+                                  setCropTask({ mode: 'avatar', file: f });
                                 }}
                               />
                             </label>
@@ -2131,6 +2172,24 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
             );
             setProfileRefreshKey((k) => k + 1);
             notify('アイコン・プロフィールを更新しました');
+          }}
+        />
+      )}
+
+      {/* 画像トリミング・リサイズモーダル */}
+      {cropTask && (
+        <ImageCropModal
+          file={cropTask.file}
+          mode={cropTask.mode}
+          onCancel={() => setCropTask(null)}
+          onConfirm={(processedFile) => {
+            const task = cropTask;
+            setCropTask(null);
+            if (task.mode === 'evidence') {
+              void uploadEvidence(task.session, processedFile);
+            } else {
+              void handleTeacherAvatarUpload(processedFile);
+            }
           }}
         />
       )}

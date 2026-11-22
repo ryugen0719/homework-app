@@ -7,6 +7,7 @@ import StudentAvatar, {
   STUDENT_COLOR_OPTIONS,
   STUDENT_ICON_OPTIONS,
 } from './StudentAvatar';
+import ImageCropModal from './ImageCropModal';
 
 interface StudentProfile {
   id: string;
@@ -37,26 +38,15 @@ export default function ProfileModal({
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [pendingCropFile, setPendingCropFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    if (!['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(file.type)) {
-      setError('JPG・PNG・WebP・GIF形式の画像を選択してください');
-      return;
-    }
-    if (file.size > 5 * 1024 * 1024) {
-      setError('画像サイズは5MB以下にしてください');
-      return;
-    }
-
+  const uploadProcessedAvatar = async (processedFile: File) => {
     setUploading(true);
     setError('');
     try {
       const formData = new FormData();
-      formData.append('file', file);
+      formData.append('file', processedFile);
       formData.append('studentId', student.id);
 
       const res = await fetch('/api/avatar/upload', {
@@ -75,8 +65,24 @@ export default function ProfileModal({
       setError('通信エラーが発生しました。もう一度お試しください。');
     } finally {
       setUploading(false);
-      if (fileInputRef.current) fileInputRef.current.value = '';
     }
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (fileInputRef.current) fileInputRef.current.value = '';
+    if (!file) return;
+
+    if (!['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(file.type)) {
+      setError('JPG・PNG・WebP・GIF形式の画像を選択してください');
+      return;
+    }
+    if (file.size > 15 * 1024 * 1024) {
+      setError('画像サイズは15MB以下にしてください');
+      return;
+    }
+    setError('');
+    setPendingCropFile(file);
   };
 
   const handleRemoveAvatar = () => {
@@ -302,6 +308,18 @@ export default function ProfileModal({
           </div>
         </form>
       </div>
+
+      {pendingCropFile && (
+        <ImageCropModal
+          file={pendingCropFile}
+          mode="avatar"
+          onCancel={() => setPendingCropFile(null)}
+          onConfirm={(processedFile) => {
+            setPendingCropFile(null);
+            void uploadProcessedAvatar(processedFile);
+          }}
+        />
+      )}
     </div>
   );
 }

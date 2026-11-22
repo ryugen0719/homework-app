@@ -1,20 +1,17 @@
 'use client';
 
-import { useEffect, useState, useTransition } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Camera,
   Check,
   Clock,
   Copy,
   Crown,
-  Eye,
-  EyeOff,
   Flag,
   Flame,
   Info,
   Medal,
   RefreshCw,
-  SlidersHorizontal,
   Trophy,
 } from 'lucide-react';
 import StudentAvatar from '../components/StudentAvatar';
@@ -57,7 +54,6 @@ interface RankingViewProps {
   role: '生徒' | '先生';
   currentStudentId?: string;
   refreshKey?: number;
-  onOpenProfile?: () => void;
 }
 
 function getRankStyle(rank: number) {
@@ -93,13 +89,15 @@ function getRankStyle(rank: number) {
   };
 }
 
-export default function RankingView({ token, role, refreshKey = 0, onOpenProfile }: RankingViewProps) {
-  const [data, setData] = useState<RankingData | null>(null);
-  const [loading, setLoading] = useState(true);
+// トークン単位の簡易メモリキャッシュ（タブ切替時の待ち時間をゼロにする）
+const rankingCache = new Map<string, RankingData>();
+
+export default function RankingView({ token, role, refreshKey = 0 }: RankingViewProps) {
+  const [data, setData] = useState<RankingData | null>(() => rankingCache.get(token) ?? null);
+  const [loading, setLoading] = useState(() => !rankingCache.has(token));
   const [error, setError] = useState('');
   const [copiedInvite, setCopiedInvite] = useState(false);
   const [showRules, setShowRules] = useState(false);
-  const [isPending, startTransition] = useTransition();
 
   // 招待参加用モーダル
   const [showJoinModal, setShowJoinModal] = useState(false);
@@ -117,7 +115,8 @@ export default function RankingView({ token, role, refreshKey = 0, onOpenProfile
       if (!res.ok) {
         throw new Error('ランキングの取得に失敗しました');
       }
-      const json = await res.json();
+      const json: RankingData = await res.json();
+      rankingCache.set(token, json);
       setData(json);
     } catch (e) {
       setError(e instanceof Error ? e.message : '取得に失敗しました');
@@ -137,46 +136,26 @@ export default function RankingView({ token, role, refreshKey = 0, onOpenProfile
         if (!res.ok) {
           throw new Error('ランキングの取得に失敗しました');
         }
-        const json = await res.json();
+        const json: RankingData = await res.json();
+        rankingCache.set(token, json);
         if (active) {
           setData(json);
           setLoading(false);
         }
       } catch (e) {
         if (active) {
-          setError(e instanceof Error ? e.message : '取得に失敗しました');
+          if (!rankingCache.has(token)) {
+            setError(e instanceof Error ? e.message : '取得に失敗しました');
+          }
           setLoading(false);
         }
       }
     };
-    load();
+    void load();
     return () => {
       active = false;
     };
   }, [token, refreshKey]);
-
-  const handleToggleOptOut = async (currentOptOut: boolean) => {
-    startTransition(async () => {
-      try {
-        const res = await fetch('/api/ranking', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-app-token': token,
-          },
-          body: JSON.stringify({
-            action: 'toggle-opt-out',
-            optOut: !currentOptOut,
-          }),
-        });
-        if (res.ok) {
-          fetchRanking();
-        }
-      } catch {
-        // ignore
-      }
-    });
-  };
 
   const handleJoinGroup = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -238,30 +217,24 @@ export default function RankingView({ token, role, refreshKey = 0, onOpenProfile
     );
   }
 
-  const { group, members, maxPoints, currentUser } = data;
+  const { group, members, maxPoints } = data;
   const isStudent = role === '生徒';
   const myData = members.find((m) => m.isMe);
-  const isOptedOut = currentUser.rankingOptOut;
   const myBonusTotal = (myData?.weekStreakBonus || 0) + (myData?.weekPhotoBonus || 0);
 
   // トラックのゴール基準点
   const trackMax = Math.max(maxPoints, 50);
 
   return (
-    <div className="space-y-5">
-      {/* ヘッダー＆パーソナルメトリクス */}
-      <div className="rounded-3xl border border-line bg-card p-5 sm:p-6 shadow-card">
+    <div className="space-y-6">
+      {/* ヘッダー（カード枠を廃しキャンバスに直接配置） */}
+      <div className="space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-2.5">
-            <span className="size-9 rounded-xl bg-primary-soft text-primary-ink grid place-items-center shrink-0">
-              <Trophy size={18} />
-            </span>
-            <div>
-              <h2 className="text-lg sm:text-xl font-extrabold text-ink tracking-tight leading-tight">
-                {group.name}
-              </h2>
-              <span className="text-[11px] font-medium text-muted">毎週月曜リセット</span>
-            </div>
+          <div className="flex items-baseline gap-2.5">
+            <h2 className="text-lg sm:text-xl font-extrabold text-ink tracking-tight m-0">
+              {group.name}
+            </h2>
+            <span className="text-xs font-medium text-muted">毎週月曜リセット</span>
           </div>
 
           <div className="flex flex-wrap items-center gap-1.5">
@@ -269,7 +242,7 @@ export default function RankingView({ token, role, refreshKey = 0, onOpenProfile
               <button
                 type="button"
                 onClick={() => copyInviteCode(group.inviteCode!)}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-xl bg-card-subtle border border-line hover:border-primary/40 text-ink transition-all cursor-pointer"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-xl bg-card border border-line hover:border-primary/40 text-ink transition-all cursor-pointer"
                 title="招待コードをコピー"
               >
                 {copiedInvite ? (
@@ -286,42 +259,13 @@ export default function RankingView({ token, role, refreshKey = 0, onOpenProfile
               </button>
             )}
 
-            {isStudent && onOpenProfile && (
-              <button
-                type="button"
-                onClick={onOpenProfile}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-xl bg-card-subtle hover:bg-card border border-line hover:border-primary/40 text-ink transition-all cursor-pointer"
-                title="アイコンやカラーを変更"
-              >
-                <SlidersHorizontal size={13} className="text-primary" />
-                <span>アイコン</span>
-              </button>
-            )}
-
-            {isStudent && (
-              <button
-                type="button"
-                onClick={() => handleToggleOptOut(Boolean(isOptedOut))}
-                disabled={isPending}
-                className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-xl border transition-all cursor-pointer ${
-                  isOptedOut
-                    ? 'bg-amber-500/12 text-amber-800 dark:text-amber-300 border-amber-600/30'
-                    : 'bg-card-subtle text-muted hover:text-ink border-line'
-                }`}
-                title={isOptedOut ? '現在非公開（個人モード）' : '現在公開中'}
-              >
-                {isOptedOut ? <EyeOff size={13} /> : <Eye size={13} />}
-                <span>{isOptedOut ? '非公開' : '公開中'}</span>
-              </button>
-            )}
-
             <button
               type="button"
               onClick={() => setShowRules((v) => !v)}
               className={`p-2 rounded-xl border transition-all cursor-pointer ${
                 showRules
                   ? 'bg-primary-soft text-primary-ink border-primary/30'
-                  : 'bg-card-subtle text-muted hover:text-ink border-line'
+                  : 'bg-card text-muted hover:text-ink border-line'
               }`}
               title="ポイントルールを表示"
               aria-label="ポイントルール"
@@ -333,7 +277,7 @@ export default function RankingView({ token, role, refreshKey = 0, onOpenProfile
             <button
               type="button"
               onClick={fetchRanking}
-              className="p-2 rounded-xl text-muted hover:text-ink bg-card-subtle hover:bg-card border border-line transition-all cursor-pointer"
+              className="p-2 rounded-xl text-muted hover:text-ink bg-card hover:bg-card-subtle border border-line transition-all cursor-pointer"
               title="更新"
               aria-label="更新"
             >
@@ -342,9 +286,9 @@ export default function RankingView({ token, role, refreshKey = 0, onOpenProfile
           </div>
         </div>
 
-        {/* 開閉式ルールガイド（通常時は非表示でスッキリ） */}
+        {/* 開閉式ルールガイド */}
         {showRules && (
-          <div className="mt-4 p-3.5 rounded-2xl bg-card-subtle/80 border border-line/70 grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-xs">
+          <div className="px-4 py-3 rounded-xl bg-card border border-line grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-xs">
             <div className="flex items-center gap-2 text-ink">
               <Clock size={14} className="text-primary shrink-0" />
               <span>勉強時間: <strong className="font-numbers">1分 = 1pt</strong></span>
@@ -360,25 +304,23 @@ export default function RankingView({ token, role, refreshKey = 0, onOpenProfile
           </div>
         )}
 
-        {/* 生徒の自分サマリー（枠線ノイズを抑えたサーフェス設計） */}
+        {/* 生徒の自分サマリー（入れ子ゼロ：1枚のシートを細い仕切り線で4分割） */}
         {isStudent && myData && (
-          <div className="mt-5 pt-5 border-t border-line/60 grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-            <div className="p-3 rounded-2xl bg-card-subtle/70">
+          <div className="grid grid-cols-2 sm:grid-cols-4 rounded-2xl border border-line bg-card shadow-card divide-y sm:divide-y-0 sm:divide-x divide-line/70 overflow-hidden">
+            <div className="px-4 py-3.5">
               <span className="text-[11px] font-semibold text-muted flex items-center gap-1 mb-1">
                 <Trophy size={11} />
                 順位
               </span>
               <div className="flex items-baseline gap-1 font-numbers">
                 <span className="text-2xl font-extrabold text-ink tracking-tight">
-                  {isOptedOut ? '—' : `${myData.rank}位`}
+                  {myData.rank}位
                 </span>
-                {!isOptedOut && (
-                  <span className="text-xs text-muted font-medium">/{members.length}</span>
-                )}
+                <span className="text-xs text-muted font-medium">/{members.length}</span>
               </div>
             </div>
 
-            <div className="p-3 rounded-2xl bg-primary-soft">
+            <div className="px-4 py-3.5 border-l sm:border-l-0 border-line/70 bg-primary-soft/35">
               <span className="text-[11px] font-semibold text-primary-ink flex items-center gap-1 mb-1">
                 <Flag size={11} />
                 スコア
@@ -391,7 +333,7 @@ export default function RankingView({ token, role, refreshKey = 0, onOpenProfile
               </div>
             </div>
 
-            <div className="p-3 rounded-2xl bg-card-subtle/70">
+            <div className="px-4 py-3.5">
               <span className="text-[11px] font-semibold text-muted flex items-center gap-1 mb-1">
                 <Clock size={11} />
                 時間
@@ -404,7 +346,7 @@ export default function RankingView({ token, role, refreshKey = 0, onOpenProfile
               </div>
             </div>
 
-            <div className="p-3 rounded-2xl bg-card-subtle/70">
+            <div className="px-4 py-3.5 border-l sm:border-l-0 border-line/70">
               <span className="text-[11px] font-semibold text-muted flex items-center gap-1 mb-1">
                 <Flame size={11} className="text-amber-700 dark:text-amber-400" />
                 ボーナス
@@ -420,206 +362,196 @@ export default function RankingView({ token, role, refreshKey = 0, onOpenProfile
         )}
       </div>
 
-      {/* メイン：レーストラック本体 */}
-      <div className="rounded-3xl border border-line bg-card shadow-card overflow-hidden">
-        <div className="px-5 sm:px-6 py-3.5 border-b border-line/70 bg-card-subtle/40 flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <Flag size={15} className="text-primary" />
-            <h3 className="font-bold text-sm text-ink tracking-tight m-0">レーストラック</h3>
-          </div>
-          <span className="text-xs font-semibold text-muted font-numbers">
-            GOAL <strong className="text-ink">{trackMax}pt</strong>
-          </span>
+      {/* メイン：統合スタジアム・レーストラック（二重枠を撤廃し1枚の主役シートに） */}
+      {members.length === 0 ? (
+        <div className="rounded-2xl border border-line bg-card py-16 text-center text-muted text-sm">
+          <p>まだ参加メンバーがいません</p>
         </div>
-
-        {members.length === 0 ? (
-          <div className="py-16 text-center text-muted text-sm">
-            <p>まだ参加メンバーがいません</p>
-          </div>
-        ) : (
-          <div className="p-4 sm:p-6">
-            {/* 距離スケールヘッダー */}
-            <div className="hidden sm:grid grid-cols-[120px_1fr_92px] items-center gap-4 mb-3 px-2 text-[10px] font-bold uppercase tracking-wider text-muted font-numbers">
-              <span>RUNNER</span>
-              <div className="flex items-center justify-between px-1">
-                <span>START</span>
-                <span>{Math.round(trackMax * 0.25)}</span>
-                <span>{Math.round(trackMax * 0.5)}</span>
-                <span>{Math.round(trackMax * 0.75)}</span>
-                <span className="inline-flex items-center gap-1 text-primary-ink">
-                  <Flag size={10} />
-                  {trackMax}pt
-                </span>
-              </div>
-              <span className="text-right">SCORE</span>
+      ) : (
+        <div className="relative rounded-2xl border border-line bg-card shadow-card overflow-hidden">
+          {/* 上部距離スケールバー */}
+          <div className="grid grid-cols-1 sm:grid-cols-[156px_1fr_104px] items-center border-b border-line bg-card-subtle/75 px-3 sm:px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-muted font-numbers">
+            <span className="hidden sm:block">LANE / RUNNER</span>
+            <div className="relative flex items-center justify-between px-4 sm:px-5">
+              <span className="text-ink">START</span>
+              <span className="hidden sm:inline">{Math.round(trackMax * 0.25)}</span>
+              <span>{Math.round(trackMax * 0.5)}</span>
+              <span className="hidden sm:inline">{Math.round(trackMax * 0.75)}</span>
+              <span className="inline-flex items-center gap-1 text-primary-ink">
+                <Flag size={10} />
+                {trackMax}pt
+              </span>
             </div>
+            <span className="hidden sm:block text-right">SCORE</span>
+          </div>
 
-            {/* レーン一覧 */}
-            <div className="space-y-3">
-              {members.map((member, index) => {
-                const rawRatio = trackMax > 0 ? Math.min(1, member.weekPoints / trackMax) : 0;
-                const percent = Math.round(rawRatio * 100);
-                const rankStyle = getRankStyle(member.rank);
+              {/* 全レーン連続トラック */}
+              <div className="relative divide-y divide-dashed divide-line/90">
+                {members.map((member, index) => {
+                  const rawRatio = trackMax > 0 ? Math.min(1, member.weekPoints / trackMax) : 0;
+                  const percent = Math.round(rawRatio * 100);
+                  const rankStyle = getRankStyle(member.rank);
 
-                const higherMember = members
-                  .slice(0, index)
-                  .reverse()
-                  .find((m) => m.weekPoints > member.weekPoints);
-                const gapToHigher = higherMember ? higherMember.weekPoints - member.weekPoints : 0;
+                  const higherMember = members
+                    .slice(0, index)
+                    .reverse()
+                    .find((m) => m.weekPoints > member.weekPoints);
+                  const gapToHigher = higherMember ? higherMember.weekPoints - member.weekPoints : 0;
 
-                const laneColor = member.color || '#0F6F65';
+                  const laneColor = member.color || '#0F6F65';
 
-                return (
-                  <div
-                    key={member.studentId}
-                    className={`relative rounded-2xl p-3.5 sm:p-4 transition-all ${
-                      member.isMe
-                        ? 'bg-primary-soft/55 ring-1 ring-primary/35'
-                        : 'bg-card-subtle/45 hover:bg-card-subtle/75'
-                    }`}
-                  >
-                    {/* 上段：ランナー情報＆スコア */}
-                    <div className="flex flex-wrap items-center justify-between gap-2 mb-2.5">
-                      <div className="flex items-center gap-2 min-w-0">
+                  return (
+                    <div
+                      key={member.studentId}
+                      className={`relative grid grid-cols-1 sm:grid-cols-[156px_1fr_104px] items-center gap-2 sm:gap-3 px-3 sm:px-4 py-3 sm:py-3.5 transition-colors ${
+                        member.isMe
+                          ? 'bg-primary-soft/45'
+                          : 'hover:bg-card-subtle/40'
+                      }`}
+                    >
+                      {/* 自分のレーン左端アクセント */}
+                      {member.isMe && (
                         <span
-                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold border shrink-0 font-numbers ${rankStyle.badge}`}
-                        >
-                          {rankStyle.icon}
-                          <span>{rankStyle.label}</span>
-                        </span>
+                          className="absolute inset-y-0 left-0 w-1 bg-primary"
+                          aria-hidden="true"
+                        />
+                      )}
 
-                        <span className="font-bold text-sm sm:text-base text-ink truncate">
-                          {member.displayName}
-                        </span>
-
-                        {member.isMe && (
-                          <span className="px-1.5 py-0.5 rounded-md bg-primary text-white text-[10px] font-bold shrink-0">
-                            あなた
-                          </span>
-                        )}
-
-                        {(member.currentStreak || 0) >= 2 && (
+                      {/* 1列目：レーン番号・順位・名前（モバイルではスコアと横並び） */}
+                      <div className="flex items-center justify-between gap-2 min-w-0">
+                        <div className="flex items-center gap-2 min-w-0">
                           <span
-                            className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md bg-amber-500/15 text-amber-800 dark:text-amber-300 text-[10px] font-bold shrink-0 font-numbers"
-                            title={`${member.currentStreak}日連続`}
+                            className="text-[10px] font-extrabold text-muted font-numbers w-4 shrink-0"
+                            aria-hidden="true"
                           >
-                            <Flame size={11} />
-                            {member.currentStreak}日
+                            {index + 1}
                           </span>
-                        )}
+                          <span
+                            className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[11px] font-bold border shrink-0 font-numbers ${rankStyle.badge}`}
+                          >
+                            {rankStyle.icon}
+                            <span>{rankStyle.label}</span>
+                          </span>
+                          <span className="font-bold text-sm text-ink truncate">
+                            {member.displayName}
+                          </span>
+                          {member.isMe && (
+                            <span className="px-1.5 py-0.5 rounded bg-primary text-white text-[9px] font-bold shrink-0">
+                              あなた
+                            </span>
+                          )}
+                        </div>
+
+                        {/* モバイル用スコア */}
+                        <div className="flex sm:hidden items-baseline gap-1 font-numbers shrink-0">
+                          <span className="text-base font-extrabold text-ink">{member.weekPoints}</span>
+                          <span className="text-[11px] font-bold text-muted">pt</span>
+                        </div>
                       </div>
 
-                      <div className="flex items-center gap-2.5 ml-auto font-numbers">
-                        {gapToHigher > 0 && higherMember && (
-                          <span className="hidden sm:inline-flex items-center px-2 py-0.5 rounded-full bg-card text-[11px] font-semibold text-muted border border-line/80">
-                            {higherMember.rank}位まで <strong className="text-ink ml-1">-{gapToHigher}pt</strong>
-                          </span>
-                        )}
-                        <div className="flex items-baseline gap-1">
-                          <span className="text-lg sm:text-xl font-extrabold text-ink tracking-tight">
+                      {/* 2列目：全レーン共通の並走コース */}
+                      <div className="relative h-12 flex items-center px-4 sm:px-5">
+                        {/* コース上の縦ガイドライン（全レーンで位置が完全一致） */}
+                        <div className="absolute inset-y-0 left-4 right-4 sm:left-5 sm:right-5 pointer-events-none">
+                          {/* スタートライン */}
+                          <div className="absolute inset-y-0 left-0 border-l-2 border-line-strong/80" />
+                          {/* クォーターライン */}
+                          <div className="absolute inset-y-1 left-1/4 border-l border-dashed border-line" />
+                          <div className="absolute inset-y-1 left-1/2 border-l border-dashed border-line" />
+                          <div className="absolute inset-y-1 left-3/4 border-l border-dashed border-line" />
+                          {/* ゴールチェッカーライン */}
+                          <div
+                            className="absolute inset-y-0 right-0 w-2 opacity-25"
+                            style={{
+                              backgroundImage:
+                                'repeating-conic-gradient(currentColor 0% 25%, transparent 0% 50%)',
+                              backgroundSize: '6px 6px',
+                            }}
+                          />
+                        </div>
+
+                        {/* 走行バー＆ランナー */}
+                        <div className="relative w-full h-3 rounded-full bg-card border border-line/60 shadow-inner">
+                          {/* スリップストリーム（走行軌跡） */}
+                          <div
+                            className="absolute inset-y-0 left-0 rounded-full transition-all duration-700 ease-out"
+                            style={{
+                              width: `${percent}%`,
+                              background: `linear-gradient(90deg, color-mix(in srgb, ${laneColor} 35%, transparent), ${laneColor})`,
+                            }}
+                          />
+
+                          {/* ランナーアバター */}
+                          <div
+                            className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 transition-all duration-700 ease-out z-10"
+                            style={{ left: `${percent}%` }}
+                          >
+                            <div className="relative flex items-center justify-center">
+                              {member.rank === 1 && member.weekPoints > 0 && (
+                                <span className="absolute -top-3.5 left-1/2 -translate-x-1/2 text-amber-600 dark:text-amber-400">
+                                  <Crown size={12} className="fill-amber-400" />
+                                </span>
+                              )}
+                              <StudentAvatar
+                                avatarUrl={member.avatarUrl}
+                                icon={member.icon}
+                                color={laneColor}
+                                name={member.displayName}
+                                size="md"
+                                shape="circle"
+                                className={`ring-2 ${member.isMe ? 'ring-primary' : rankStyle.ring} shadow-card`}
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* 3列目：スコア＆コンパクト内訳 */}
+                      <div className="flex sm:flex-col sm:items-end justify-between gap-1 font-numbers">
+                        <div className="hidden sm:flex items-baseline gap-1">
+                          <span className="text-lg font-extrabold text-ink tracking-tight">
                             <CountUp to={member.weekPoints} duration={0.7} trigger="load" />
                           </span>
                           <span className="text-xs font-bold text-muted">pt</span>
                         </div>
-                      </div>
-                    </div>
 
-                    {/* 中段：トラック本体 */}
-                    <div className="relative h-12 sm:h-14 w-full rounded-2xl bg-card border border-line/70 px-5 sm:px-6 flex items-center overflow-hidden">
-                      <span
-                        className="absolute left-2.5 text-[10px] font-extrabold text-muted-soft font-numbers select-none pointer-events-none"
-                        aria-hidden="true"
-                      >
-                        L{index + 1}
-                      </span>
-
-                      <div className="absolute inset-y-0 left-5 right-5 sm:left-6 sm:right-6 pointer-events-none">
-                        <div className="absolute inset-y-2 left-1/4 border-l border-dashed border-line" />
-                        <div className="absolute inset-y-2 left-1/2 border-l border-dashed border-line" />
-                        <div className="absolute inset-y-2 left-3/4 border-l border-dashed border-line" />
-                        <div
-                          className="absolute inset-y-0 right-0 w-2 opacity-20"
-                          style={{
-                            backgroundImage:
-                              'repeating-conic-gradient(currentColor 0% 25%, transparent 0% 50%)',
-                            backgroundSize: '6px 6px',
-                          }}
-                        />
-                      </div>
-
-                      <div className="relative w-full h-2.5 rounded-full bg-card-subtle dark:bg-white/10">
-                        <div
-                          className="absolute inset-y-0 left-0 rounded-full transition-all duration-700 ease-out"
-                          style={{
-                            width: `${percent}%`,
-                            background: `linear-gradient(90deg, color-mix(in srgb, ${laneColor} 45%, transparent), ${laneColor})`,
-                          }}
-                        />
-
-                        <div
-                          className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 transition-all duration-700 ease-out z-10"
-                          style={{ left: `${percent}%` }}
-                        >
-                          <div className="relative flex items-center justify-center">
-                            {member.rank === 1 && member.weekPoints > 0 && (
-                              <span className="absolute -top-3.5 left-1/2 -translate-x-1/2 text-amber-600 dark:text-amber-400">
-                                <Crown size={13} className="fill-amber-400" />
-                              </span>
-                            )}
-                            <StudentAvatar
-                              avatarUrl={member.avatarUrl}
-                              icon={member.icon}
-                              color={laneColor}
-                              name={member.displayName}
-                              size="md"
-                              shape="circle"
-                              className={`ring-2 ${member.isMe ? 'ring-primary' : rankStyle.ring} shadow-card`}
-                            />
-                          </div>
+                        <div className="flex items-center gap-2 text-[11px] font-semibold text-muted">
+                          <span className="inline-flex items-center gap-0.5" title="勉強時間">
+                            <Clock size={11} />
+                            {member.weekMinutes}分
+                          </span>
+                          {member.weekStreakBonus > 0 && (
+                            <span
+                              className="inline-flex items-center gap-0.5 text-amber-800 dark:text-amber-300"
+                              title="連続ボーナス"
+                            >
+                              <Flame size={11} />
+                              +{member.weekStreakBonus}
+                            </span>
+                          )}
+                          {(member.weekPhotoBonus || 0) > 0 && (
+                            <span
+                              className="inline-flex items-center gap-0.5 text-primary-ink"
+                              title="写真提出ボーナス"
+                            >
+                              <Camera size={11} />
+                              +{member.weekPhotoBonus}
+                            </span>
+                          )}
                         </div>
-                      </div>
-                    </div>
 
-                    {/* 下段：アイコン中心のコンパクト内訳 */}
-                    <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[11px] font-semibold font-numbers">
-                      <div className="flex items-center gap-3 text-muted">
-                        <span className="inline-flex items-center gap-1" title="勉強時間">
-                          <Clock size={12} />
-                          {member.weekMinutes}分
-                        </span>
-                        {member.weekStreakBonus > 0 && (
-                          <span
-                            className="inline-flex items-center gap-1 text-amber-800 dark:text-amber-300"
-                            title="連続ボーナス"
-                          >
-                            <Flame size={12} />
-                            +{member.weekStreakBonus}
-                          </span>
-                        )}
-                        {(member.weekPhotoBonus || 0) > 0 && (
-                          <span
-                            className="inline-flex items-center gap-1 text-primary-ink"
-                            title="写真提出ボーナス"
-                          >
-                            <Camera size={12} />
-                            +{member.weekPhotoBonus}
+                        {gapToHigher > 0 && higherMember && (
+                          <span className="sm:hidden text-[11px] font-semibold text-muted">
+                            {higherMember.rank}位まで <strong className="text-ink">-{gapToHigher}pt</strong>
                           </span>
                         )}
                       </div>
-
-                      {gapToHigher > 0 && higherMember && (
-                        <span className="sm:hidden text-[11px] font-semibold text-muted">
-                          {higherMember.rank}位まで <strong className="text-ink">-{gapToHigher}pt</strong>
-                        </span>
-                      )}
                     </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-      </div>
+                  );
+                })}
+              </div>
+        </div>
+      )}
 
       {/* 招待コードで参加モーダル */}
       {showJoinModal && (

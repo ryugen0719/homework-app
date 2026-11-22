@@ -5,7 +5,6 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   ArrowDownUp,
   Award,
-  BookOpen,
   Calendar,
   CheckCircle2,
   Clock,
@@ -17,7 +16,6 @@ import {
   LoaderCircle,
   MessageCircle,
   Search,
-  Sparkles,
   X,
 } from 'lucide-react';
 
@@ -286,64 +284,53 @@ export default function TimelineView({
 
   return (
     <div className="flex flex-col gap-6 w-full">
-      {/* タイムライン概要ヘッダー */}
-      <section className="rounded-2xl border border-line bg-card p-4 sm:p-5 shadow-card">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div className="flex items-center gap-2">
-            <span className="p-1.5 rounded-lg bg-primary-soft text-primary-ink">
-              <BookOpen size={18} />
-            </span>
-            <h2 className="text-base sm:text-lg font-bold text-ink m-0">
-              タイムライン
-            </h2>
+      {/* タイムライン ツールバー（カード枠を廃しキャンバスに直接配置） */}
+      <div className="space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          {/* 表示モード切り替え: ストリーム / 写真アルバム */}
+          <div className="inline-flex p-1 rounded-xl bg-card-subtle border border-line text-xs font-semibold">
+            <button
+              type="button"
+              onClick={() => setDisplayMode('stream')}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
+                displayMode === 'stream'
+                  ? 'bg-card text-ink shadow-subtle'
+                  : 'text-muted hover:text-ink'
+              }`}
+            >
+              <ListFilter size={14} />
+              <span>ノート</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setDisplayMode('gallery')}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
+                displayMode === 'gallery'
+                  ? 'bg-card text-ink shadow-subtle'
+                  : 'text-muted hover:text-ink'
+              }`}
+            >
+              <LayoutGrid size={14} />
+              <span>写真 ({allPhotos.length})</span>
+            </button>
           </div>
 
-          <div className="flex items-center gap-2">
-            {/* 表示モード切り替え: ストリーム / 写真アルバム */}
-            <div className="inline-flex p-1 rounded-xl bg-card-subtle border border-line text-xs font-semibold">
-              <button
-                type="button"
-                onClick={() => setDisplayMode('stream')}
-                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
-                  displayMode === 'stream'
-                    ? 'bg-card text-ink shadow-subtle'
-                    : 'text-muted hover:text-ink'
-                }`}
-              >
-                <ListFilter size={14} />
-                <span>ノート形式</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setDisplayMode('gallery')}
-                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
-                  displayMode === 'gallery'
-                    ? 'bg-card text-ink shadow-subtle'
-                    : 'text-muted hover:text-ink'
-                }`}
-              >
-                <LayoutGrid size={14} />
-                <span>写真アルバム ({allPhotos.length})</span>
-              </button>
-            </div>
-
-            {/* 全期間データ読み込みボタン */}
-            {!hasLoadedAll && onRequestAllData && (
-              <button
-                type="button"
-                onClick={onRequestAllData}
-                disabled={loadingAll}
-                className="inline-flex items-center gap-1.5 text-xs font-bold text-primary hover:text-primary-hover px-3 py-1.5 rounded-xl border border-primary/30 bg-primary-soft/60 hover:bg-primary-soft transition-all shadow-subtle w-fit active:scale-95"
-              >
-                {loadingAll ? <LoaderCircle size={13} className="animate-spin" aria-hidden="true" /> : <Sparkles size={13} />}
-                <span>{loadingAll ? '全期間を読み込み中…' : '全期間を取得'}</span>
-              </button>
-            )}
-          </div>
+          {/* 全期間データ読み込みボタン */}
+          {!hasLoadedAll && onRequestAllData && (
+            <button
+              type="button"
+              onClick={onRequestAllData}
+              disabled={loadingAll}
+              className="inline-flex items-center gap-1.5 text-xs font-semibold text-primary hover:text-primary-hover px-3 py-1.5 rounded-xl border border-line bg-card hover:border-primary/40 transition-all cursor-pointer disabled:opacity-50"
+            >
+              {loadingAll && <LoaderCircle size={13} className="animate-spin" aria-hidden="true" />}
+              <span>{loadingAll ? '読み込み中…' : '全期間を取得'}</span>
+            </button>
+          )}
         </div>
 
         {/* フィルター＆検索バー */}
-        <div className="mt-4 pt-4 border-t border-line/60 flex flex-col sm:flex-row flex-wrap items-stretch sm:items-center gap-2.5">
+        <div className="flex flex-col sm:flex-row flex-wrap items-stretch sm:items-center gap-2">
           {/* 検索入力 */}
           <div className="relative flex-1 min-w-[200px]">
             <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
@@ -455,7 +442,7 @@ export default function TimelineView({
             </button>
           )}
         </div>
-      </section>
+      </div>
 
       {/* コンテンツエリア */}
       {filteredDays.length === 0 ? (
