@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import StudentAvatar from '../components/StudentAvatar';
 import CountUp from '../components/CountUp/CountUp';
+import { formatDuration } from '../lib/format-duration';
 
 interface RankingMember {
   studentId: string;
@@ -339,10 +340,29 @@ export default function RankingView({ token, role, refreshKey = 0 }: RankingView
                 時間
               </span>
               <div className="flex items-baseline gap-1 font-numbers">
-                <span className="text-2xl font-extrabold text-ink tracking-tight">
-                  <CountUp to={myData.weekMinutes} duration={0.7} trigger="load" />
-                </span>
-                <span className="text-xs text-muted font-medium">分</span>
+                {myData.weekMinutes >= 60 ? (
+                  <>
+                    <span className="text-2xl font-extrabold text-ink tracking-tight">
+                      <CountUp to={Math.floor(myData.weekMinutes / 60)} duration={0.7} trigger="load" />
+                    </span>
+                    <span className="text-xs text-muted font-medium">時間</span>
+                    {myData.weekMinutes % 60 > 0 && (
+                      <>
+                        <span className="text-xl font-extrabold text-ink tracking-tight ml-0.5">
+                          <CountUp to={myData.weekMinutes % 60} duration={0.7} trigger="load" />
+                        </span>
+                        <span className="text-xs text-muted font-medium">分</span>
+                      </>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <span className="text-2xl font-extrabold text-ink tracking-tight">
+                      <CountUp to={myData.weekMinutes} duration={0.7} trigger="load" />
+                    </span>
+                    <span className="text-xs text-muted font-medium">分</span>
+                  </>
+                )}
               </div>
             </div>
 
@@ -518,7 +538,7 @@ export default function RankingView({ token, role, refreshKey = 0 }: RankingView
                         <div className="flex items-center gap-2 text-[11px] font-semibold text-muted">
                           <span className="inline-flex items-center gap-0.5" title="勉強時間">
                             <Clock size={11} />
-                            {member.weekMinutes}分
+                            {formatDuration(member.weekMinutes)}
                           </span>
                           {member.weekStreakBonus > 0 && (
                             <span
@@ -555,7 +575,7 @@ export default function RankingView({ token, role, refreshKey = 0 }: RankingView
 
       {/* 招待コードで参加モーダル */}
       {showJoinModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-ink/30 backdrop-blur-sm animate-fade-in">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
           <div className="rounded-3xl border border-line bg-card p-6 w-full max-w-md shadow-card">
             <h3 className="text-lg font-bold text-ink mb-2">グループに参加</h3>
             <p className="text-xs text-muted mb-4">

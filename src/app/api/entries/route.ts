@@ -295,9 +295,9 @@ export async function PUT(request: Request) {
       return NextResponse.json({ ok: true }, { headers: { 'Cache-Control': 'no-store' } });
     }
 
-    if (action === 'review') {
+    if (action === 'review' || action === 'review-save') {
       if (auth.role !== 'teacher' || !validDate(value.date) || value.date > todayJst()) return respond('この操作はできません', 403);
-      if (typeof value.comment !== 'string' || value.comment.length > 120) return respond('返信コメントを確認してください', 400);
+      if (typeof value.comment !== 'string' || value.comment.length > 1000) return respond('返信コメントを確認してください', 400);
       const comment = value.comment.trim();
       const date = value.date as string;
 

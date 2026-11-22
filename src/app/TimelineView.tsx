@@ -18,6 +18,7 @@ import {
   Search,
   X,
 } from 'lucide-react';
+import { formatDuration } from '../lib/format-duration';
 
 export type StudySession = {
   id: string;
@@ -172,6 +173,7 @@ function TimelineInlinePhoto({
 
 export default function TimelineView({
   entries,
+  role = '生徒',
   token,
   today,
   onSelectDate,
@@ -185,6 +187,7 @@ export default function TimelineView({
   const [monthFilter, setMonthFilter] = useState<string>('all');
   const [onlyWithPhoto, setOnlyWithPhoto] = useState(false);
   const [onlyReviewed, setOnlyReviewed] = useState(false);
+  const [onlyUnreviewed, setOnlyUnreviewed] = useState(false);
   const [sortOrder, setSortOrder] = useState<'desc' | 'asc'>('desc');
 
   // 全期間の月一覧
@@ -224,6 +227,10 @@ export default function TimelineView({
       result = result.filter((day) => Boolean(day.review?.reviewedAt));
     }
 
+    if (onlyUnreviewed) {
+      result = result.filter((day) => !day.review?.reviewedAt);
+    }
+
     if (onlyWithPhoto) {
       result = result.filter((day) => day.sessions.some((s) => Boolean(s.evidencePath)));
     }
@@ -242,7 +249,7 @@ export default function TimelineView({
         ? b.date.localeCompare(a.date)
         : a.date.localeCompare(b.date);
     });
-  }, [allDaysWithRecords, monthFilter, onlyReviewed, onlyWithPhoto, searchQuery, sortOrder]);
+  }, [allDaysWithRecords, monthFilter, onlyReviewed, onlyUnreviewed, onlyWithPhoto, searchQuery, sortOrder]);
 
   // 統計サマリー
   const totalSessions = useMemo(() => {
@@ -284,8 +291,8 @@ export default function TimelineView({
 
   return (
     <div className="flex flex-col gap-6 w-full">
-      {/* タイムライン ツールバー（カード枠を廃しキャンバスに直接配置） */}
-      <div className="space-y-3">
+      {/* タイムライン ツールバー（読みやすいカラム幅に整理） */}
+      <div className="space-y-3 max-w-3xl mx-auto w-full">
         <div className="flex flex-wrap items-center justify-between gap-3">
           {/* 表示モード切り替え: ストリーム / 写真アルバム */}
           <div className="inline-flex p-1 rounded-xl bg-card-subtle border border-line text-xs font-semibold">
@@ -388,10 +395,34 @@ export default function TimelineView({
             写真あり
           </button>
 
+          {/* 先生専用: 未確認のみフィルター */}
+          {role === '先生' && (
+            <button
+              type="button"
+              onClick={() => {
+                const next = !onlyUnreviewed;
+                setOnlyUnreviewed(next);
+                if (next) setOnlyReviewed(false);
+              }}
+              className={`inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-xl border transition-all cursor-pointer shadow-subtle active:scale-95 ${
+                onlyUnreviewed
+                  ? 'bg-amber-600 text-white border-amber-600 shadow-subtle'
+                  : 'border-line bg-card text-muted hover:text-ink hover:border-line-strong'
+              }`}
+            >
+              <Clock size={13} />
+              未確認のみ
+            </button>
+          )}
+
           {/* 先生確認済みフィルター */}
           <button
             type="button"
-            onClick={() => setOnlyReviewed(!onlyReviewed)}
+            onClick={() => {
+              const next = !onlyReviewed;
+              setOnlyReviewed(next);
+              if (next) setOnlyUnreviewed(false);
+            }}
             className={`inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-xl border transition-all cursor-pointer shadow-subtle active:scale-95 ${
               onlyReviewed
                 ? 'bg-reward text-white border-reward shadow-subtle'
@@ -399,7 +430,7 @@ export default function TimelineView({
             }`}
           >
             <CheckCircle2 size={13} />
-            先生の返信あり
+            {role === '先生' ? '確認済み' : '先生の返信あり'}
           </button>
 
           {/* ソート切り替え */}
@@ -422,12 +453,11 @@ export default function TimelineView({
             </span>
             <span className="mx-2 opacity-40">|</span>
             <span>
-              合計学習時間: <strong className="text-ink font-numbers font-bold">{totalMinutes}</strong> 分
-              {totalMinutes >= 60 && `（${Math.floor(totalMinutes / 60)}時間${totalMinutes % 60}分）`}
+              合計: <strong className="text-ink font-numbers font-bold">{formatDuration(totalMinutes)}</strong>
             </span>
           </div>
 
-          {(searchQuery || monthFilter !== 'all' || onlyWithPhoto || onlyReviewed) && (
+          {(searchQuery || monthFilter !== 'all' || onlyWithPhoto || onlyReviewed || onlyUnreviewed) && (
             <button
               type="button"
               onClick={() => {
@@ -435,6 +465,7 @@ export default function TimelineView({
                 setMonthFilter('all');
                 setOnlyWithPhoto(false);
                 setOnlyReviewed(false);
+                setOnlyUnreviewed(false);
               }}
               className="text-primary hover:underline font-semibold"
             >
@@ -446,19 +477,21 @@ export default function TimelineView({
 
       {/* コンテンツエリア */}
       {filteredDays.length === 0 ? (
-        <div className="rounded-2xl border border-line bg-card p-10 sm:p-14 text-center shadow-card">
+        <div className="max-w-3xl mx-auto w-full rounded-2xl border border-line bg-card p-10 sm:p-14 text-center shadow-card">
           <Clock size={40} className="mx-auto mb-3 opacity-40 text-muted" />
           <h3 className="text-base sm:text-lg font-bold text-ink mb-2">記録が見つかりませんでした</h3>
           <p className="text-xs sm:text-sm max-w-md mx-auto mb-6 text-ink/75 leading-relaxed">
             {allDaysWithRecords.length === 0
-              ? 'まだ勉強記録がありません。カレンダー画面から今日の学びを記録してみましょう！'
+              ? role === '先生'
+                ? 'この生徒の勉強記録はまだありません。'
+                : 'まだ勉強記録がありません。カレンダー画面から今日の学びを記録してみましょう！'
               : '検索条件に一致する記録がありません。フィルターを変更してみてください。'}
           </p>
-          {today && (
+          {today && role !== '先生' && (
             <button
               type="button"
               onClick={() => onSelectDate(today)}
-              className="inline-flex items-center gap-2.5 px-6 py-3 rounded-2xl bg-[#0D4B43] dark:bg-primary text-white text-sm sm:text-base font-bold shadow-md hover:bg-[#083E38] dark:hover:bg-primary-hover hover:shadow-lg transition-all active:scale-95 cursor-pointer ring-1 ring-black/10 dark:ring-white/10"
+              className="inline-flex items-center gap-2.5 px-6 py-3 rounded-xl bg-primary text-white text-sm sm:text-base font-bold shadow-subtle hover:bg-primary-hover transition-all active:scale-95 cursor-pointer"
             >
               <Calendar size={18} className="text-white shrink-0" />
               <span className="tracking-wide">カレンダーで今日の勉強を記録する</span>
@@ -508,7 +541,7 @@ export default function TimelineView({
                     <button
                       type="button"
                       onClick={() => onSelectDate(photo.date)}
-                      className="text-[#0D4B43] dark:text-primary-ink hover:underline font-bold flex items-center gap-1 text-[11px]"
+                      className="text-primary-ink hover:underline font-bold flex items-center gap-1 text-[11px]"
                     >
                       <ExternalLink size={11} />
                       カレンダー
@@ -521,7 +554,7 @@ export default function TimelineView({
         )
       ) : (
         /* ストリーム（交換ノート）モード */
-        <div className="flex flex-col gap-6">
+        <div className="flex flex-col gap-5 max-w-3xl mx-auto w-full">
           {filteredDays.map((dayItem) => {
             const dateInfo = formatDateFull(dayItem.date);
             const isToday = dayItem.date === today;
@@ -534,8 +567,8 @@ export default function TimelineView({
                 className="rounded-2xl border border-line bg-card shadow-card overflow-hidden transition-all hover:border-line-strong"
               >
                 {/* 日付ヘッダーバー */}
-                <div className="bg-card-subtle/70 px-4 sm:px-5 py-3 border-b border-line flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2.5">
+                <div className="bg-card-subtle/70 px-4 sm:px-5 py-3 border-b border-line flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
                     <span className="p-1 rounded-lg bg-card border border-line text-primary">
                       <Calendar size={15} />
                     </span>
@@ -558,13 +591,13 @@ export default function TimelineView({
                   <div className="flex items-center gap-3">
                     {dayMinutes > 0 && (
                       <span className="text-xs font-semibold px-2 py-0.5 rounded-md bg-card border border-line text-muted font-numbers">
-                        計 {dayMinutes} 分
+                        計 {formatDuration(dayMinutes)}
                       </span>
                     )}
                     <button
                       type="button"
                       onClick={() => onSelectDate(dayItem.date)}
-                      className="inline-flex items-center gap-1 text-xs font-bold text-[#0D4B43] dark:text-primary-ink hover:underline transition-colors"
+                      className="inline-flex items-center gap-1 text-xs font-bold text-primary-ink hover:underline transition-colors cursor-pointer"
                       title="この日をカレンダーで開いて編集・確認する"
                     >
                       <span>カレンダーで開く</span>
@@ -573,45 +606,51 @@ export default function TimelineView({
                   </div>
                 </div>
 
-                {/* 生徒の記録エリア（コンテンツ） */}
-                <div className="p-4 sm:p-5 flex flex-col gap-4">
+                {/* 生徒の記録エリア（左に時刻・学習時間、右に内容で対応関係を明確化） */}
+                <div className="divide-y divide-line/70 px-4 sm:px-5">
                   {dayItem.sessions.map((session, sIndex) => {
                     const sessionTime = formatTime(session.createdAt);
                     return (
-                      <div key={session.id || sIndex} className="flex flex-col gap-2.5">
-                        <div className="flex items-center justify-between gap-2">
-                          <div className="flex items-center gap-2">
-                            <span className="size-5 rounded-md bg-card-subtle text-muted text-xs font-bold font-numbers inline-flex items-center justify-center border border-line">
-                              {sIndex + 1}
+                      <div
+                        key={session.id || sIndex}
+                        className="py-3.5 sm:py-4 grid grid-cols-1 sm:grid-cols-[104px_minmax(0,1fr)] gap-1.5 sm:gap-4 items-start"
+                      >
+                        {/* 時刻・学習時間（モバイルは横並び、PCは左列に集約） */}
+                        <div className="flex sm:flex-col items-center sm:items-start gap-2 sm:gap-1.5 pt-0.5">
+                          {sessionTime ? (
+                            <span className="text-xs sm:text-sm font-bold font-numbers text-ink tabular-nums">
+                              {sessionTime}
                             </span>
-                            {session.minutes && (
-                              <span className="inline-flex items-center gap-1 text-xs font-bold px-2 py-0.5 rounded-full bg-primary-soft text-primary-ink font-numbers">
-                                <Clock size={11} />
-                                {session.minutes}分
-                              </span>
-                            )}
-                          </div>
-                          {sessionTime && (
-                            <span className="text-[11px] text-muted font-numbers">{sessionTime}</span>
-                          )}
+                          ) : !session.minutes ? (
+                            <span className="text-xs font-medium text-muted" aria-hidden="true">
+                              •
+                            </span>
+                          ) : null}
+                          {session.minutes ? (
+                            <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-md bg-primary-soft text-primary-ink font-numbers tabular-nums">
+                              <Clock size={11} />
+                              {formatDuration(session.minutes)}
+                            </span>
+                          ) : null}
                         </div>
 
-                        {/* 勉強内容 */}
-                        <p className="text-sm sm:text-base leading-relaxed text-ink whitespace-pre-wrap break-words m-0 font-normal">
-                          {session.content}
-                        </p>
+                        {/* 勉強内容と提出写真 */}
+                        <div className="min-w-0 flex flex-col gap-2">
+                          <p className="text-sm sm:text-[15px] leading-relaxed text-ink whitespace-pre-wrap break-words m-0 font-normal">
+                            {session.content}
+                          </p>
 
-                        {/* 提出写真（存在すればインラインでフル表示） */}
-                        {session.evidencePath && (
-                          <div className="mt-1">
-                            <TimelineInlinePhoto
-                              pathname={session.evidencePath}
-                              token={token}
-                              label={session.content}
-                              onOpenPreview={onOpenPreview}
-                            />
-                          </div>
-                        )}
+                          {session.evidencePath && (
+                            <div className="mt-0.5">
+                              <TimelineInlinePhoto
+                                pathname={session.evidencePath}
+                                token={token}
+                                label={session.content}
+                                onOpenPreview={onOpenPreview}
+                              />
+                            </div>
+                          )}
+                        </div>
                       </div>
                     );
                   })}

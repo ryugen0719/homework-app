@@ -4,14 +4,12 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { upload } from '@vercel/blob/client';
 import { toast } from 'sonner';
-import confetti from 'canvas-confetti';
 import {
   BadgeCheck,
   BarChart3,
   Calendar,
   Camera,
   Check,
-  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Clock,
@@ -23,7 +21,6 @@ import {
   PencilLine,
   Plus,
   RotateCcw,
-  Sparkles,
   Sun,
   Trash2,
   Trophy,
@@ -37,15 +34,22 @@ import TimelineView from './TimelineView';
 import StatsView from './StatsView';
 import RankingView from './RankingView';
 import LoginView from './LoginView';
-import HoldButton from '../components/HoldButton/HoldButton';
 import RubberSegment from '../components/RubberSegment/RubberSegment';
 import StudentAvatar, {
-  renderPresetIcon,
   STUDENT_COLOR_OPTIONS,
-  STUDENT_ICON_OPTIONS,
 } from '../components/StudentAvatar';
 import ProfileModal from '../components/ProfileModal';
 import ImageCropModal from '../components/ImageCropModal';
+import StudyComposerModal from '../components/StudyComposerModal';
+import TeacherReviewModal from '../components/TeacherReviewModal';
+import { formatDuration, formatDurationCompact } from '../lib/format-duration';
+import {
+  getSoundMuted,
+  playAppSound,
+  preloadAppSounds,
+  setAppSoundMuted,
+  setAppSoundRole,
+} from '../components/sounds';
 
 type StudySession = { id: string; content: string; minutes?: number; evidencePath?: string; createdAt?: string; updatedAt?: string };
 type Review = { comment?: string; reviewedAt?: string };
@@ -67,12 +71,10 @@ type StudentInfo = {
   createdAt?: string;
 };
 
-const QUICK_MINUTES = [15, 30, 45, 60];
 const DEFAULT_STUDENT_COLORS = STUDENT_COLOR_OPTIONS;
-const DEFAULT_STUDENT_ICONS = STUDENT_ICON_OPTIONS;
 
-const emptySubscribe = () => () => {};
-const getThemeSnapshot = () => {
+const emptySubscribe = () => () => { };
+const getThemeSnapshot = (): 'light' | 'dark' => {
   if (typeof window === 'undefined') return 'light';
   return localStorage.getItem('theme') === 'dark' ? 'dark' : 'light';
 };
@@ -89,7 +91,7 @@ const subscribeAuth = (callback: () => void) => {
   return () => window.removeEventListener('storage', callback);
 };
 const subscribeDesktop = (callback: () => void) => {
-  if (typeof window === 'undefined') return () => {};
+  if (typeof window === 'undefined') return () => { };
   const mq = window.matchMedia('(min-width: 1024px)');
   mq.addEventListener('change', callback);
   return () => mq.removeEventListener('change', callback);
@@ -109,6 +111,18 @@ function formatDate(date: string) {
   const weekday = new Intl.DateTimeFormat('ja-JP', { timeZone: 'Asia/Tokyo', weekday: 'short' }).format(dateAtJst(date));
   return `${Number(date.slice(5, 7))}月${Number(date.slice(8, 10))}日（${weekday}）`;
 }
+function formatRecordedTime(isoString?: string) {
+  if (!isoString) return '';
+  try {
+    return new Intl.DateTimeFormat('ja-JP', {
+      timeZone: 'Asia/Tokyo',
+      hour: '2-digit',
+      minute: '2-digit',
+    }).format(new Date(isoString));
+  } catch {
+    return '';
+  }
+}
 function monthLabel(monthStr: string) {
   if (!monthStr) return '';
   const [year, month] = monthStr.split('-');
@@ -118,9 +132,6 @@ function blankEntry(date: string): DayEntry {
   return { date, sessions: [] };
 }
 
-function renderStudentIcon(iconName: string, size = 16) {
-  return renderPresetIcon(iconName, size);
-}
 
 /**
  * 先生の確認済みチェックバッジ（lucide-react の BadgeCheck を使用）
@@ -147,7 +158,7 @@ function RecordSeal({ size = 20, className = '' }: { size?: number; className?: 
       className={`stamp-seal inline-grid place-items-center rounded-full bg-reward text-white ${className}`}
       aria-label="勉強完了シール"
     >
-      <Check size={Math.round(size * 0.62)} strokeWidth={3} className="stroke-white" />
+      <Check size={Math.round(size * 0.62)} strokeWidth={3} className="stroke-current" />
     </span>
   );
 }
@@ -205,7 +216,7 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
             role: (parsed.role as '生徒' | '先生') || initialRole,
           };
         }
-      } catch {}
+      } catch { }
     }
     return { token: '', role: initialRole };
   }, [accessToken, initialRole, authOverride, storedAuth]);
@@ -214,15 +225,38 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
   const authChecked = useSyncExternalStore(emptySubscribe, () => true, () => false);
 
   const today = useSyncExternalStore(emptySubscribe, todayJst, () => '');
-  const storedTheme = useSyncExternalStore(subscribeTheme, getThemeSnapshot, () => 'light');
+  const storedTheme = useSyncExternalStore(subscribeTheme, getThemeSnapshot, () => 'light' as const);
   const [themeOverride, setThemeOverride] = useState<'light' | 'dark' | null>(null);
   const theme = themeOverride ?? storedTheme;
+  const soundRole = role === '先生' ? 'teacher' : 'student';
+  const storedSoundMuted = useSyncExternalStore(
+    subscribeTheme,
+    () => getSoundMuted(soundRole),
+    () => soundRole === 'teacher'
+  );
+  const [soundMutedOverride, setSoundMutedOverride] = useState<{ role: 'teacher' | 'student'; muted: boolean } | null>(null);
+  const soundMuted = soundMutedOverride?.role === soundRole ? soundMutedOverride.muted : storedSoundMuted;
   const [previewImage, setPreviewImage] = useState<{ src: string; label: string } | null>(null);
+
+  useEffect(() => {
+    setAppSoundRole(soundRole);
+    preloadAppSounds();
+  }, [soundRole]);
+
+  function toggleSound() {
+    const nextMuted = !soundMuted;
+    setSoundMutedOverride({ role: soundRole, muted: nextMuted });
+    setAppSoundMuted(nextMuted, soundRole);
+    if (!nextMuted) {
+      playAppSound('clasp');
+    }
+  }
 
   function toggleTheme() {
     const next = theme === 'dark' ? 'light' : 'dark';
     setThemeOverride(next);
     document.documentElement.setAttribute('data-theme', next);
+    playAppSound(next === 'dark' ? 'nightfall' : 'daylight');
     try {
       localStorage.setItem('theme', next);
     } catch {
@@ -238,7 +272,7 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
           'homework_auth',
           JSON.stringify({ token: accessToken, role: initialRole })
         );
-      } catch {}
+      } catch { }
     }
   }, [accessToken, initialRole]);
 
@@ -280,6 +314,7 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
   const [calendarViewOverride, setCalendarView] = useState<'week' | 'month' | null>(null);
   const calendarView = calendarViewOverride ?? (isDesktop ? 'month' : 'week');
   const [activeTab, setActiveTab] = useState<'calendar' | 'timeline' | 'ranking' | 'stats'>('calendar');
+  const currentTab = role === '先生' && (activeTab === 'ranking' || activeTab === 'stats') ? 'calendar' : activeTab;
   const [hasLoadedAll, setHasLoadedAll] = useState(false);
   const [loadingAll, setLoadingAll] = useState(false);
   const day = selectedDate || today || '';
@@ -294,6 +329,7 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
   const [uploading, setUploading] = useState('');
   const [uploadPercent, setUploadPercent] = useState(0);
   const [showPastComposer, setShowPastComposer] = useState(false);
+  const [reviewModalOpen, setReviewModalOpen] = useState(false);
   const [cropTask, setCropTask] = useState<
     | { mode: 'evidence'; file: File; session: StudySession }
     | { mode: 'avatar'; file: File }
@@ -345,7 +381,7 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
           setSelectedStudentId(data.student.id);
         }
       })
-      .catch(() => {});
+      .catch(() => { });
     return () => {
       active = false;
     };
@@ -371,6 +407,19 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
   const loading = Boolean(token && currentMonth && !dataReady && !error);
   const entry = entries[day] || blankEntry(day);
   const sessions = useMemo(() => entry.sessions || [], [entry.sessions]);
+  const displayedSessions = useMemo(() => {
+    return sessions
+      .map((session, index) => ({ session, index }))
+      .sort((a, b) => {
+        const aTime = a.session.createdAt ? Date.parse(a.session.createdAt) : Number.NaN;
+        const bTime = b.session.createdAt ? Date.parse(b.session.createdAt) : Number.NaN;
+        if (!Number.isNaN(aTime) && !Number.isNaN(bTime) && aTime !== bTime) {
+          return bTime - aTime;
+        }
+        return b.index - a.index;
+      })
+      .map(({ session }) => session);
+  }, [sessions]);
   const draft = drafts[day] || { id: '', content: '', minutes: '' };
   const savedReview = entry.review || {};
   const reviewDraft = reviewDrafts[day] || { comment: savedReview.comment || '' };
@@ -500,7 +549,7 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
     return item.comment !== (saved.comment || '');
   });
 
-  // 先生用: 未確認の提出日一覧
+  // 先生用: 未確認の提出日一覧（古い順で順次確認しやすい）
   const unreviewedDates = useMemo(() => {
     if (role !== '先生' || !dataReady) return [];
     return Object.values(entries)
@@ -510,8 +559,12 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
         count: d.sessions.length,
         minutes: d.sessions.reduce((sum, s) => sum + (s.minutes || 0), 0),
       }))
-      .sort((a, b) => b.date.localeCompare(a.date));
+      .sort((a, b) => a.date.localeCompare(b.date));
   }, [entries, role, dataReady]);
+
+  const nextUnreviewedDate = useMemo(() => {
+    return unreviewedDates.find((item) => item.date !== day)?.date || null;
+  }, [unreviewedDates, day]);
 
   // 月データのフェッチ（生徒IDをパラメータに含める）
   useEffect(() => {
@@ -674,37 +727,38 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
   function startEdit(session: StudySession) {
     if (draft.content.trim() && draft.id !== session.id && !window.confirm('入力中の内容を破棄して、この記録を編集しますか？')) return;
     setDrafts((current) => ({ ...current, [day]: { id: session.id, content: session.content, minutes: session.minutes?.toString() || '' } }));
-    document.getElementById('study-content')?.focus();
+    setError('');
+    setShowPastComposer(true);
   }
 
-  async function saveSession() {
+  function openNewComposer() {
+    playAppSound('breeze');
+    if (draft.id) {
+      setDrafts((current) => { const next = { ...current }; delete next[day]; return next; });
+    }
+    setError('');
+    setShowPastComposer(true);
+  }
+
+  async function saveSession(): Promise<boolean> {
     const content = draft.content.trim();
     const minutes = draft.minutes.trim() ? Number(draft.minutes) : undefined;
-    if (!dataReady || !canLog || !content) { setError('勉強した内容を入力してください。'); return; }
-    if (minutes !== undefined && (!Number.isInteger(minutes) || minutes < 1 || minutes > 1440)) { setError('学習時間は1〜1440分で入力してください。'); return; }
+    if (!dataReady || !canLog || !content) { setError('勉強した内容を入力してください。'); return false; }
+    if (minutes !== undefined && (!Number.isInteger(minutes) || minutes < 1 || minutes > 1440)) { setError('学習時間は1〜1440分で入力してください。'); return false; }
     const id = draft.id || crypto.randomUUID();
     const existing = sessions.find((session) => session.id === id);
     const now = new Date().toISOString();
     const next: StudySession = { id, content, ...(minutes ? { minutes } : {}), ...(existing?.evidencePath ? { evidencePath: existing.evidencePath } : {}), createdAt: existing?.createdAt || now, updatedAt: now };
     setSaving(true); setError('');
     const response = await put({ action: 'session-save', date: day, id, content, ...(minutes ? { minutes } : {}) });
-    if (!response?.ok) { setError('記録を保存できませんでした。入力は残っています。もう一度お試しください。'); setSaving(false); return; }
+    if (!response?.ok) { setError('記録を保存できませんでした。入力は残っています。もう一度お試しください。'); setSaving(false); return false; }
     updateDay(day, { sessions: existing ? sessions.map((item) => item.id === id ? next : item) : [...sessions, next] });
     setDrafts((current) => { const nextDrafts = { ...current }; delete nextDrafts[day]; return nextDrafts; });
     setSaving(false);
-    notify(existing ? '記録を更新しました' : '勉強を記録しました');
-
-    // 新規記録時の達成感演出（紙吹雪）
-    if (!existing && typeof window !== 'undefined' && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      void confetti({
-        particleCount: 55,
-        spread: 68,
-        startVelocity: 32,
-        origin: { y: 0.72 },
-        colors: ['#0D5C52', '#14B8A6', '#F59E0B', '#38BDF8', '#10B981'],
-        disableForReducedMotion: true,
-      });
+    if (existing) {
+      notify('記録を更新しました');
     }
+    return true;
   }
 
   async function deleteSession(session: StudySession) {
@@ -714,17 +768,29 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
     if (!response?.ok) { setError('記録を削除できませんでした。もう一度お試しください。'); setSaving(false); return; }
     updateDay(day, { sessions: sessions.filter((item) => item.id !== session.id) });
     if (draft.id === session.id) setDrafts((current) => { const next = { ...current }; delete next[day]; return next; });
-    setSaving(false); notify('記録を削除しました');
+    setSaving(false);
+    playAppSound('erase');
+    notify('記録を削除しました');
   }
 
-  async function saveReview() {
+  async function saveReview(jumpToNext = false): Promise<boolean> {
     const comment = reviewDraft.comment.trim();
-    if (!dataReady || !day) return;
+    if (!dataReady || !day || sessions.length === 0) return false;
     setSaving(true); setError('');
-    const response = await put({ action: 'review-save', date: day, comment });
-    if (!response?.ok) { setError('コメントを保存できませんでした。入力は残っています。もう一度お試しください。'); setSaving(false); return; }
+    const response = await put({ action: 'review', date: day, comment });
+    if (!response?.ok) { setError('コメントを保存できませんでした。入力は残っています。もう一度お試しください。'); setSaving(false); return false; }
     updateDay(day, { review: { comment, reviewedAt: new Date().toISOString() } });
-    setSaving(false); notify('先生の確認コメントを保存しました');
+    setSaving(false);
+    playAppSound('heart');
+    if (jumpToNext && nextUnreviewedDate) {
+      teacherManuallyNavigated.current = true;
+      setSelectedMonth(nextUnreviewedDate.slice(0, 7));
+      setSelectedDate(nextUnreviewedDate);
+      notify('確認を保存し、次の未確認へ移動しました');
+    } else {
+      notify('確認完了として保存しました');
+    }
+    return true;
   }
 
   async function uploadEvidence(session: StudySession, file: File) {
@@ -745,6 +811,7 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
       const response = await put({ action: 'session-save', date: day, id: session.id, content: session.content, ...(session.minutes ? { minutes: session.minutes } : {}), evidencePath: blob.pathname });
       if (!response?.ok) throw new Error();
       updateDay(day, { sessions: sessions.map((item) => item.id === session.id ? { ...item, evidencePath: blob.pathname } : item) });
+      playAppSound('uplink');
       notify('写真を保存しました');
     } catch {
       setError('画像を保存できませんでした。もう一度お試しください。');
@@ -886,7 +953,7 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
     if (window.confirm('ログアウトしますか？')) {
       try {
         localStorage.removeItem('homework_auth');
-      } catch {}
+      } catch { }
       setAuthOverride({ token: '', role: '生徒' });
       // キャッシュとステートを完全にリセット
       setEntries({});
@@ -918,7 +985,7 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
         'homework_auth',
         JSON.stringify({ token: data.token, role: roleLabel })
       );
-    } catch {}
+    } catch { }
     // キャッシュをクリアして新アカウントのデータを確実に再取得
     setEntries({});
     setLoadedMonths({});
@@ -927,6 +994,9 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
     setHasLoadedAll(false);
 
     setAuthOverride({ token: data.token, role: roleLabel });
+    if (data.role === 'teacher') {
+      setActiveTab('calendar');
+    }
     if (data.student) {
       setSelectedStudentId(data.student.id);
       setStudents([{
@@ -941,6 +1011,8 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
         status: 'active',
       }]);
     }
+    setAppSoundRole(data.role);
+    playAppSound('heart');
     notify(
       data.role === 'teacher'
         ? '先生としてログインしました'
@@ -1012,87 +1084,41 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
         {/* 先生・生徒別のアカウント表示/切り替えUI */}
         <div className="flex items-center gap-1.5 sm:gap-2 ml-auto">
           {role === '先生' ? (
-            <div className="flex items-center gap-1.5 sm:gap-2">
-              {/* 先生用: 担当生徒切り替えセレクター */}
-              {students.length > 0 && (
-                <div className="relative inline-flex items-center">
-                  <select
-                    value={selectedStudentId}
-                    onChange={(e) => handleSelectStudent(e.target.value)}
-                    className="appearance-none max-w-[132px] sm:max-w-[200px] truncate pl-7 sm:pl-8 pr-6 sm:pr-7 py-1.5 rounded-xl text-xs font-bold border border-line bg-card hover:bg-card-subtle text-ink cursor-pointer focus:outline-none focus:border-primary shadow-subtle"
-                    title="担当生徒を切り替え"
-                  >
-                    {students.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.name} ({s.displayName})
-                      </option>
-                    ))}
-                  </select>
-                  {/* カラーピル */}
-                  <span
-                    className="absolute left-2.5 size-2.5 sm:size-3 rounded-full pointer-events-none"
-                    style={{ backgroundColor: currentStudent?.color || '#0F6F65' }}
-                  />
-                  <ChevronDown size={13} className="absolute right-2 text-muted pointer-events-none" />
-                </div>
-              )}
-
-              {/* 生徒管理モーダル起動ボタン */}
-              <button
-                type="button"
-                onClick={() => setStudentModalOpen(true)}
-                className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs font-bold rounded-xl bg-card border border-line hover:border-primary/50 text-ink hover:text-primary shadow-subtle transition-all cursor-pointer"
-                title="生徒の管理・追加"
-                aria-label="生徒管理"
-              >
-                <Users size={15} className="text-primary" />
-                <span className="hidden sm:inline">生徒管理</span>
-              </button>
-
-              {/* 先生用ログアウトボタン */}
-              <button
-                type="button"
-                onClick={handleLogout}
-                className="inline-flex items-center gap-1.5 px-2 sm:px-2.5 py-1.5 text-xs font-semibold rounded-xl text-muted hover:text-ink hover:bg-card-subtle transition-all cursor-pointer"
-                title="ログアウト"
-                aria-label="ログアウト"
-              >
-                <LogOut size={14} />
-                <span className="hidden sm:inline">ログアウト</span>
-              </button>
-            </div>
+            <button
+              type="button"
+              onClick={handleLogout}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold rounded-xl text-muted hover:text-ink hover:bg-card-subtle transition-all cursor-pointer"
+              title="ログアウト"
+              aria-label="ログアウト"
+            >
+              <LogOut size={14} />
+              <span className="hidden sm:inline">ログアウト</span>
+            </button>
           ) : (
-            /* 生徒用: ログイン中表示（タップでアイコン設定）＆切り替え（ログアウト）ボタン */
+            /* 生徒用: アイコンタップでプロフィールカード（切り替え・アイコン変更・各種設定）を表示 */
             <div className="flex items-center gap-1.5 sm:gap-2">
               {currentStudent && (
                 <button
                   type="button"
-                  onClick={() => setProfileModalOpen(true)}
-                  className="inline-flex items-center gap-1.5 sm:gap-2 pl-1 pr-2.5 sm:pl-1.5 sm:pr-3 py-1 rounded-full bg-card border border-line hover:border-primary/50 text-xs font-bold text-ink shadow-subtle transition-all cursor-pointer group max-w-[140px] sm:max-w-[200px]"
-                  title="アイコンやカラーを設定"
+                  onClick={() => {
+                    playAppSound('breeze');
+                    setProfileModalOpen(true);
+                  }}
+                  className="inline-flex items-center gap-2 p-1 sm:pr-3 rounded-full bg-card border border-line hover:border-primary/50 text-xs font-bold text-ink shadow-subtle transition-all cursor-pointer active:scale-95 max-w-[160px] sm:max-w-[200px]"
+                  title="プロフィール・設定・切り替えを開く"
+                  aria-label="プロフィールを開く"
                 >
                   <StudentAvatar
                     avatarUrl={currentStudent.avatarUrl}
                     icon={currentStudent.icon}
                     color={currentStudent.color}
                     name={currentStudent.displayName}
-                    size="xs"
+                    size="sm"
                     shape="circle"
                   />
-                  <span className="truncate">{currentStudent.displayName}</span>
-                  <PencilLine size={11} className="text-muted group-hover:text-primary transition-colors shrink-0" />
+                  <span className="hidden sm:inline truncate">{currentStudent.displayName}</span>
                 </button>
               )}
-              <button
-                type="button"
-                onClick={handleLogout}
-                className="inline-flex items-center gap-1.5 px-2 sm:px-2.5 py-1.5 text-xs font-semibold rounded-xl text-muted hover:text-ink hover:bg-card-subtle transition-all cursor-pointer"
-                title="生徒を切り替える（ログアウト）"
-                aria-label="切り替え"
-              >
-                <LogOut size={14} />
-                <span className="hidden sm:inline">切り替え</span>
-              </button>
             </div>
           )}
 
@@ -1120,73 +1146,94 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
         </div>
       </header>
 
-      {/* 先生用コンパクトバー（生徒用は冗長な説明を省き即コンテンツへ） */}
-      {role === '先生' && (
-        <section className="mb-5 flex flex-wrap items-center justify-between gap-3">
-          <h1 className="m-0 text-xl sm:text-2xl font-extrabold tracking-tight text-ink">
-            {currentStudent?.name || '生徒'}さんの学習記録
-          </h1>
-          <button
-            type="button"
-            onClick={() => setStudentModalOpen(true)}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-xl bg-primary-soft hover:bg-primary/15 text-primary-ink border border-primary/25 transition-all cursor-pointer"
-          >
-            <Users size={14} />
-            <span>生徒管理（{students.length}/5）</span>
-          </button>
-        </section>
-      )}
+      {/* 先生用: 1タップ生徒切り替え＋表示モード統合バー */}
+      {role === '先生' ? (
+        <section className="mb-5 flex flex-col gap-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            {/* ワンタップ生徒切り替えピル一覧 */}
+            <div className="flex flex-wrap items-center gap-1.5">
+              {students.map((s) => {
+                const active = s.id === selectedStudentId;
+                return (
+                  <button
+                    key={s.id}
+                    type="button"
+                    onClick={() => handleSelectStudent(s.id)}
+                    className={`inline-flex items-center gap-2 pl-1.5 pr-3 py-1.5 rounded-full text-xs font-bold border transition-all cursor-pointer ${
+                      active
+                        ? 'bg-primary text-white border-primary shadow-subtle'
+                        : 'bg-card hover:bg-card-subtle text-ink border-line'
+                    }`}
+                  >
+                    <StudentAvatar
+                      avatarUrl={s.avatarUrl}
+                      icon={s.icon}
+                      color={s.color}
+                      name={s.name}
+                      size="xs"
+                      shape="circle"
+                      className={active ? '!ring-white/60' : ''}
+                    />
+                    <span className="max-w-[120px] truncate">{s.name}</span>
+                  </button>
+                );
+              })}
 
-      {/* ビュー切り替えタブ（React Bits RubberSegment） */}
-      <div className="mb-6">
-        <RubberSegment
-          aria-label="表示モードの切り替え"
-          value={activeTab}
-          onChange={(val) => {
-            const next = val as 'calendar' | 'timeline' | 'ranking' | 'stats';
-            setActiveTab(next);
-            if ((next === 'timeline' || next === 'stats') && !hasLoadedAll) {
-              void loadAllData();
-            }
-          }}
-          items={[
-            { value: 'calendar', label: 'カレンダー', icon: <Calendar size={15} /> },
-            { value: 'timeline', label: 'タイムライン', icon: <Clock size={15} /> },
-            { value: 'ranking', label: 'レース', icon: <Trophy size={15} /> },
-            { value: 'stats', label: '統計', icon: <BarChart3 size={15} /> },
-          ]}
-          trackColor="var(--card)"
-          thumbColor="var(--primary)"
-          textColor="var(--text-sub)"
-          activeTextColor="#ffffff"
-          size="lg"
-          radius={14}
-          inset={4}
-          equalSlots={true}
-          className="w-full sm:w-auto border border-line shadow-card"
-        />
-      </div>
-
-      {/* 1. カレンダータブ */}
-      {activeTab === 'calendar' && (
-      <div className="flex flex-col gap-6 w-full">
-        {/* 先生専用: 未確認の提出フィード（ToDoキュー） */}
-        {role === '先生' && dataReady && (
-          <section className="rounded-2xl border border-line bg-card p-4 sm:p-5 shadow-card">
-            <div className="flex items-center justify-between gap-2 mb-2.5">
-              <div className="flex items-center gap-2">
-                <span className="flex size-7 items-center justify-center rounded-lg bg-amber-500/10 text-amber-600 dark:text-amber-400">
-                  <Clock size={15} />
-                </span>
-                <h3 className="text-sm font-bold text-ink m-0">未確認の学習記録</h3>
-              </div>
-              <span className={`text-xs font-bold px-2.5 py-0.5 rounded-full font-numbers ${unreviewedDates.length > 0 ? 'bg-amber-500/15 text-amber-800 dark:text-amber-300 border border-amber-500/30' : 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400'}`}>
-                {unreviewedDates.length > 0 ? `${unreviewedDates.length}件の要確認` : 'すべて確認済み ✓'}
-              </span>
+              <button
+                type="button"
+                onClick={() => setStudentModalOpen(true)}
+                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-bold border border-dashed border-line-strong bg-card hover:border-primary/60 text-muted hover:text-primary transition-all cursor-pointer"
+                title="生徒の追加・編集・URLコピー"
+              >
+                <Users size={13} />
+                <span>生徒管理 ({students.length}/5)</span>
+              </button>
             </div>
 
-            {unreviewedDates.length > 0 ? (
-              <div className="flex flex-wrap gap-2 pt-1">
+            {/* 先生用2タブ切り替え */}
+            <div className="flex items-center gap-2.5 ml-auto">
+              {dataReady && unreviewedDates.length === 0 && (
+                <span className="hidden sm:inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-reward-soft text-reward-ink border border-reward-line/40 text-xs font-bold">
+                  <Check size={12} strokeWidth={2.8} />
+                  <span>すべて確認済み</span>
+                </span>
+              )}
+              <RubberSegment
+                aria-label="表示モードの切り替え"
+                value={currentTab}
+                onChange={(val) => {
+                  const next = val as 'calendar' | 'timeline';
+                  playAppSound('tab');
+                  setActiveTab(next);
+                  if (next === 'timeline' && !hasLoadedAll) {
+                    void loadAllData();
+                  }
+                }}
+                items={[
+                  { value: 'calendar', label: 'カレンダー', icon: <Calendar size={15} /> },
+                  { value: 'timeline', label: 'タイムライン', icon: <Clock size={15} /> },
+                ]}
+                trackColor="var(--card)"
+                thumbColor="var(--primary)"
+                textColor="var(--text-sub)"
+                activeTextColor="#ffffff"
+                size="md"
+                radius={12}
+                inset={3}
+                equalSlots={true}
+                className="border border-line shadow-card"
+              />
+            </div>
+          </div>
+
+          {/* 未確認がある場合のみコンパクトなワンタップバーを表示 */}
+          {currentTab === 'calendar' && dataReady && unreviewedDates.length > 0 && (
+            <div className="flex flex-wrap items-center gap-2 px-3.5 py-2.5 rounded-2xl border border-amber-500/30 bg-amber-500/[0.06]">
+              <span className="inline-flex items-center gap-1.5 text-xs font-extrabold text-amber-800 dark:text-amber-300 shrink-0 mr-1">
+                <Clock size={13} />
+                <span>未確認 {unreviewedDates.length}件</span>
+              </span>
+              <div className="flex flex-wrap items-center gap-1.5">
                 {unreviewedDates.map((item) => (
                   <button
                     key={item.date}
@@ -1196,346 +1243,308 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
                       setSelectedMonth(item.date.slice(0, 7));
                       setSelectedDate(item.date);
                     }}
-                    className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-bold transition-all border ${day === item.date ? 'bg-primary text-white border-primary shadow-subtle' : 'bg-card hover:bg-card-subtle text-ink border-line'}`}
+                    className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold transition-all border cursor-pointer ${
+                      day === item.date
+                        ? 'bg-primary text-white border-primary shadow-subtle'
+                        : 'bg-card hover:bg-card-subtle text-ink border-line'
+                    }`}
                   >
                     <span>{formatDate(item.date)}</span>
-                    <span className={`px-1.5 py-0.2 rounded-md text-[10px] font-numbers ${day === item.date ? 'bg-white/20 text-white' : 'bg-card-subtle text-muted'}`}>
-                      {item.count}件{item.minutes > 0 ? `・${item.minutes}分` : ''}
+                    <span className={`text-[10px] font-numbers ${day === item.date ? 'text-white/85' : 'text-muted'}`}>
+                      {item.count}件{item.minutes > 0 ? `·${formatDuration(item.minutes)}` : ''}
                     </span>
                   </button>
                 ))}
               </div>
-            ) : (
-              <p className="text-xs text-muted m-0 leading-relaxed">
-                提出された勉強記録はすべて確認・返信済みです。いつも温かいサポートをありがとうございます！
-              </p>
-            )}
-          </section>
-        )}
+            </div>
+          )}
+        </section>
+      ) : (
+        /* 生徒用: 4タブ切り替え（React Bits RubberSegment） */
+        <div className="mb-6">
+          <RubberSegment
+            aria-label="表示モードの切り替え"
+            value={currentTab}
+            onChange={(val) => {
+              const next = val as 'calendar' | 'timeline' | 'ranking' | 'stats';
+              playAppSound('tab');
+              setActiveTab(next);
+              if ((next === 'timeline' || next === 'stats') && !hasLoadedAll) {
+                void loadAllData();
+              }
+            }}
+            items={[
+              { value: 'calendar', label: 'カレンダー', icon: <Calendar size={15} /> },
+              { value: 'timeline', label: 'タイムライン', icon: <Clock size={15} /> },
+              { value: 'ranking', label: 'レース', icon: <Trophy size={15} /> },
+              { value: 'stats', label: '統計', icon: <BarChart3 size={15} /> },
+            ]}
+            trackColor="var(--card)"
+            thumbColor="var(--primary)"
+            textColor="var(--text-sub)"
+            activeTextColor="#ffffff"
+            size="lg"
+            radius={14}
+            inset={4}
+            equalSlots={true}
+            className="w-full sm:w-auto border border-line shadow-card"
+          />
+        </div>
+      )}
 
-        <div className={ui.workspaceGrid}>
-          <div className={ui.calendarColumn}>
-            <section className={ui.calendarCard} aria-label={calendarView === 'week' ? '週間カレンダー' : '月間カレンダー'}>
-              {/* 表示範囲のヘッダー */}
-              <div className={ui.monthPicker}>
-                <div className="flex items-center gap-1">
-                  <button
-                    type="button"
-                    className={ui.monthNavBtn}
-                    onClick={() => changeCalendarRange(-1)}
-                    aria-label={calendarView === 'week' ? '前の週' : '前の月'}
-                    title={calendarView === 'week' ? '前の週へ' : '前の月へ'}
-                  >
-                    <ChevronLeft size={16} />
-                  </button>
-                  <button
-                    type="button"
-                    className={ui.monthNavBtn}
-                    onClick={() => changeCalendarRange(1)}
-                    aria-label={calendarView === 'week' ? '次の週' : '次の月'}
-                    title={calendarView === 'week' ? '次の週へ' : '次の月へ'}
-                  >
-                    <ChevronRight size={16} />
-                  </button>
-                </div>
-                
-                <div className={ui.monthTitle} title={calendarLabel}>
-                  <Calendar size={15} className="text-primary" />
-                  <span>{calendarRangeLabel}</span>
-                </div>
+      {/* 1. カレンダータブ */}
+      {currentTab === 'calendar' && (
+        <div className="flex flex-col gap-6 w-full">
 
-                <button
-                  type="button"
-                  className={ui.calendarViewToggle}
-                  onClick={() => setCalendarView(calendarView === 'week' ? 'month' : 'week')}
-                  aria-expanded={calendarView === 'month'}
-                  aria-controls="calendar-days"
-                  aria-label={calendarView === 'week' ? '月全体を見る' : '週間表示に戻る'}
-                  title={calendarView === 'week' ? '月全体を見る' : '週間表示に戻る'}
-                >
-                  <span>{calendarView === 'week' ? '月' : '週'}</span>
-                </button>
-              </div>
-
-              {/* 曜日ヘッダー */}
-              {calendarView === 'month' && <div className={ui.calendarWeekdays} aria-hidden="true">
-                <span>月</span>
-                <span>火</span>
-                <span>水</span>
-                <span>木</span>
-                <span>金</span>
-                <span className="text-primary-ink">土</span>
-                <span className="text-reward-ink">日</span>
-              </div>}
-
-              {loading && (
-                <p className={ui.loadingStatus} role="status" aria-live="polite">
-                  <LoaderCircle size={15} aria-hidden="true" />
-                  <span>{monthLabel(currentMonth)}の記録を読み込んでいます</span>
-                </p>
-              )}
-
-              {/* 日付グリッド */}
-              <div id="calendar-days" className={ui.calendarGrid} role="grid" aria-label={calendarLabel}>
-                {visibleCalendarCells.map((cell) => {
-                  const isSelected = cell.date === day;
-                  const isToday = cell.date === today;
-                  const isFuture = Boolean(today && cell.date > today);
-                  const cellEntry = entries[cell.date];
-                  const hasRecord = Boolean(cellEntry?.sessions?.length);
-                  const isReviewed = Boolean(cellEntry?.review?.reviewedAt);
-                  const cellMins = cellEntry?.sessions?.reduce((sum, s) => sum + (s.minutes || 0), 0) || 0;
-                  const sessionCount = cellEntry?.sessions?.length || 0;
-                  const isSat = cell.dayOfWeek === 6;
-                  const isSun = cell.dayOfWeek === 0;
-                  const weekdayLabel = ['日', '月', '火', '水', '木', '金', '土'][cell.dayOfWeek];
-
-                  return (
+          <div className={ui.workspaceGrid}>
+            <div className={ui.calendarColumn}>
+              <section className={ui.calendarCard} aria-label={calendarView === 'week' ? '週間カレンダー' : '月間カレンダー'}>
+                {/* 表示範囲のヘッダー */}
+                <div className={ui.monthPicker}>
+                  <div className="flex items-center gap-1">
                     <button
-                      key={cell.date}
                       type="button"
-                      disabled={calendarView === 'month' && !cell.isCurrentMonth}
-                      className={`${ui.calendarCell} ${calendarView === 'week' ? ui.calendarCellWeek : ''} ${calendarView === 'month' && !cell.isCurrentMonth ? ui.calendarCellOtherMonth : ''} ${isSelected ? ui.calendarCellSelected : ''} ${isToday && !isSelected ? ui.calendarCellToday : ''} ${isFuture ? ui.calendarCellFuture : ''} ${hasRecord && !isSelected ? 'bg-reward-soft/35 border-reward/20' : ''}`}
-                      onClick={() => {
-                        teacherManuallyNavigated.current = true;
-                        if (cell.date.slice(0, 7) !== currentMonth) setSelectedMonth(cell.date.slice(0, 7));
-                        setSelectedDate(cell.date);
-                        setShowPastComposer(false);
-                      }}
-                      aria-pressed={isSelected}
-                      aria-label={`${formatDate(cell.date)}${hasRecord ? `、記録${sessionCount}件` : ''}${isReviewed ? '、先生の確認あり' : ''}`}
+                      className={ui.monthNavBtn}
+                      onClick={() => changeCalendarRange(-1)}
+                      aria-label={calendarView === 'week' ? '前の週' : '前の月'}
+                      title={calendarView === 'week' ? '前の週へ' : '前の月へ'}
                     >
-                      {calendarView === 'week' && (
-                        <span className={`${ui.calendarWeekdayLabel} ${isSat && !isSelected ? 'text-primary-ink' : ''} ${isSun && !isSelected ? 'text-reward-ink' : ''}`}>
-                          {weekdayLabel}
-                        </span>
-                      )}
-                      <span className={`${ui.calendarDayNum} ${isSat && !isSelected ? 'text-primary-ink' : ''} ${isSun && !isSelected ? 'text-reward-ink' : ''}`}>
-                        {cell.dayNumber}
-                      </span>
+                      <ChevronLeft size={16} />
+                    </button>
+                    <button
+                      type="button"
+                      className={ui.monthNavBtn}
+                      onClick={() => changeCalendarRange(1)}
+                      aria-label={calendarView === 'week' ? '次の週' : '次の月'}
+                      title={calendarView === 'week' ? '次の週へ' : '次の月へ'}
+                    >
+                      <ChevronRight size={16} />
+                    </button>
+                  </div>
 
-                      <div className={`${ui.calendarMarkerArea} ${calendarView === 'week' ? ui.calendarMarkerCompact : ''}`}>
-                        {isReviewed ? (
-                          <TeacherCheckIcon size={calendarView === 'week' ? 16 : 22} className={isSelected ? '!text-white [&_svg]:!fill-white/30 [&_svg]:!stroke-white' : ''} />
-                        ) : hasRecord ? (
-                          <RecordSeal size={calendarView === 'week' ? 14 : 18} className={isSelected ? '!bg-white !text-primary' : ''} />
-                        ) : isToday ? (
-                          <span className="today-dot size-1.5 rounded-full bg-primary" title="今日" />
-                        ) : null}
+                  <div className={ui.monthTitle} title={calendarLabel}>
+                    <Calendar size={15} className="text-primary" />
+                    <span>{calendarRangeLabel}</span>
+                  </div>
 
-                        {calendarView === 'month' && hasRecord && cellMins > 0 && !isSelected && (
-                          <span className="text-[11px] tabular-nums text-muted font-bold leading-tight mt-0.5">
-                            {cellMins}分
+                  <button
+                    type="button"
+                    className={ui.calendarViewToggle}
+                    onClick={() => setCalendarView(calendarView === 'week' ? 'month' : 'week')}
+                    aria-expanded={calendarView === 'month'}
+                    aria-controls="calendar-days"
+                    aria-label={calendarView === 'week' ? '月全体を見る' : '週間表示に戻る'}
+                    title={calendarView === 'week' ? '月全体を見る' : '週間表示に戻る'}
+                  >
+                    <span>{calendarView === 'week' ? '月' : '週'}</span>
+                  </button>
+                </div>
+
+                {/* 曜日ヘッダー */}
+                {calendarView === 'month' && <div className={ui.calendarWeekdays} aria-hidden="true">
+                  <span>月</span>
+                  <span>火</span>
+                  <span>水</span>
+                  <span>木</span>
+                  <span>金</span>
+                  <span className="text-primary-ink">土</span>
+                  <span className="text-reward-ink">日</span>
+                </div>}
+
+                {loading && (
+                  <p className={ui.loadingStatus} role="status" aria-live="polite">
+                    <LoaderCircle size={15} aria-hidden="true" />
+                    <span>{monthLabel(currentMonth)}の記録を読み込んでいます</span>
+                  </p>
+                )}
+
+                {/* 日付グリッド */}
+                <div id="calendar-days" className={ui.calendarGrid} role="grid" aria-label={calendarLabel}>
+                  {visibleCalendarCells.map((cell) => {
+                    const isSelected = cell.date === day;
+                    const isToday = cell.date === today;
+                    const isFuture = Boolean(today && cell.date > today);
+                    const cellEntry = entries[cell.date];
+                    const hasRecord = Boolean(cellEntry?.sessions?.length);
+                    const isReviewed = Boolean(cellEntry?.review?.reviewedAt);
+                    const cellMins = cellEntry?.sessions?.reduce((sum, s) => sum + (s.minutes || 0), 0) || 0;
+                    const sessionCount = cellEntry?.sessions?.length || 0;
+                    const isSat = cell.dayOfWeek === 6;
+                    const isSun = cell.dayOfWeek === 0;
+                    const weekdayLabel = ['日', '月', '火', '水', '木', '金', '土'][cell.dayOfWeek];
+
+                    return (
+                      <button
+                        key={cell.date}
+                        type="button"
+                        disabled={calendarView === 'month' && !cell.isCurrentMonth}
+                        className={`${ui.calendarCell} ${calendarView === 'week' ? ui.calendarCellWeek : ''} ${calendarView === 'month' && !cell.isCurrentMonth ? ui.calendarCellOtherMonth : ''} ${isSelected ? ui.calendarCellSelected : ''} ${isToday && !isSelected ? ui.calendarCellToday : ''} ${isFuture ? ui.calendarCellFuture : ''} ${hasRecord && !isSelected ? 'bg-reward-soft/35 border-reward/20' : ''}`}
+                        onClick={() => {
+                          teacherManuallyNavigated.current = true;
+                          if (cell.date.slice(0, 7) !== currentMonth) setSelectedMonth(cell.date.slice(0, 7));
+                          setSelectedDate(cell.date);
+                          setShowPastComposer(false);
+                        }}
+                        aria-pressed={isSelected}
+                        aria-label={`${formatDate(cell.date)}${hasRecord ? `、記録${sessionCount}件` : ''}${isReviewed ? '、先生の確認あり' : ''}`}
+                      >
+                        {calendarView === 'week' && (
+                          <span className={`${ui.calendarWeekdayLabel} ${isSat && !isSelected ? 'text-primary-ink' : ''} ${isSun && !isSelected ? 'text-reward-ink' : ''}`}>
+                            {weekdayLabel}
                           </span>
                         )}
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
+                        <span className={`${ui.calendarDayNum} ${isSat && !isSelected ? 'text-primary-ink' : ''} ${isSun && !isSelected ? 'text-reward-ink' : ''}`}>
+                          {cell.dayNumber}
+                        </span>
 
-              {/* カレンダー下部サマリー */}
-              <footer className="mt-4 pt-3.5 border-t border-line/60 flex items-center justify-center gap-3 sm:gap-6 text-xs text-muted flex-wrap">
-                <div className="flex items-center gap-1.5 text-xs text-muted">
-                  <TeacherCheckIcon size={16} />
-                  <span>確認済 {monthReviewedCount}日</span>
-                </div>
-                <div className="flex items-center gap-1.5 text-xs text-muted">
-                  <RecordSeal size={16} />
-                  <span>記録 {monthRecordedDays}日</span>
-                </div>
-                {monthTotalMinutes > 0 && (
-                  <div className="flex items-center gap-1 text-xs font-bold text-ink">
-                    <Clock size={14} className="text-primary" />
-                    <span>合計 {monthTotalMinutes}分</span>
-                  </div>
-                )}
-              </footer>
-            </section>
-          </div>
+                        <div className={`${ui.calendarMarkerArea} ${calendarView === 'week' ? ui.calendarMarkerCompact : ''}`}>
+                          {isReviewed ? (
+                            <TeacherCheckIcon size={calendarView === 'week' ? 16 : 22} className={isSelected ? '!text-white [&_svg]:!fill-white/25 [&_svg]:!stroke-white' : ''} />
+                          ) : hasRecord ? (
+                            <RecordSeal size={calendarView === 'week' ? 14 : 18} className={isSelected ? '!bg-white !text-primary [&_svg]:!stroke-primary' : ''} />
+                          ) : isToday ? (
+                            <span className="today-dot size-1.5 rounded-full bg-primary" title="今日" />
+                          ) : null}
 
-          {/* 右カラム: 詳細パネル */}
-          <div className="flex flex-col gap-5 min-w-0 w-full">
-            {error && <div className="mb-4 rounded-xl border border-danger/30 bg-danger/10 p-4 text-xs font-semibold text-danger" role="alert">{error}</div>}
-            {teacherSearchError && <div className="mb-4 rounded-xl border border-danger/30 bg-danger/10 p-4 text-xs font-semibold text-danger" role="alert">{teacherSearchError}</div>}
-
-            {/* 先生用ビュー */}
-            {role === '先生' ? (
-              <section className={ui.panel}>
-                <div className="mb-4 flex items-center justify-between gap-3">
-                  <h2 className="m-0 text-lg sm:text-xl font-extrabold tracking-tight text-ink">
-                    {day ? formatDate(day) : ''}
-                  </h2>
-                  {sessions.length > 0 && (
-                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-card-subtle border border-line/70 text-xs font-bold text-muted font-numbers shrink-0">
-                      <Clock size={12} className="text-primary" />
-                      {dayMinutes > 0 ? `${dayMinutes}分` : ''}
-                      {dayMinutes > 0 ? ' · ' : ''}
-                      {sessions.length}件
-                    </span>
-                  )}
-                </div>
-
-                {sessions.length > 0 ? (
-                  <div className="divide-y divide-line/70 -mx-1">
-                    {sessions.map((session, index) => (
-                      <article
-                        className="py-3.5 first:pt-1 last:pb-1 px-1 transition-colors"
-                        key={session.id}
-                      >
-                        <div className="flex items-center justify-between gap-2 mb-1.5">
-                          <div className="flex items-center gap-2">
+                          {calendarView === 'month' && hasRecord && cellMins > 0 && (
                             <span
-                              className="text-xs font-extrabold font-numbers text-muted"
-                              aria-hidden="true"
+                              className={`text-[10px] sm:text-[11px] tabular-nums font-bold leading-none tracking-tight whitespace-nowrap mt-0.5 ${isSelected ? '!text-white/95' : 'text-muted'}`}
+                              title={formatDuration(cellMins)}
                             >
-                              #{index + 1}
+                              {formatDurationCompact(cellMins)}
                             </span>
-                            {session.minutes && (
-                              <span className="inline-flex items-center gap-1 text-xs font-bold font-numbers text-primary-ink">
-                                <Clock size={12} />
-                                {session.minutes}分
-                              </span>
-                            )}
-                          </div>
+                          )}
                         </div>
-                        <p className="m-0 text-sm sm:text-[15px] leading-relaxed text-ink whitespace-pre-wrap [overflow-wrap:anywhere]">
-                          {session.content}
-                        </p>
-                        {session.evidencePath && (
-                          <div className="mt-2.5">
-                            <EvidencePreview
-                              key={session.evidencePath}
-                              pathname={session.evidencePath}
-                              token={token}
-                              label={session.content}
-                              onOpenPreview={(src, label) => setPreviewImage({ src, label })}
-                            />
-                          </div>
-                        )}
-                      </article>
-                    ))}
-                  </div>
-                ) : (
-                  <p className={ui.empty}>この日の勉強記録はまだありません。</p>
-                )}
-
-                {/* 先生コメント入力 */}
-                <div className="mt-6 pt-4 border-t border-line">
-                  <label className={ui.fieldLabel} htmlFor="review-comment">先生からのコメント・スタンプ</label>
-                  <textarea
-                    id="review-comment"
-                    className={ui.textArea}
-                    rows={3}
-                    maxLength={1000}
-                    value={reviewDraft.comment}
-                    disabled={!dataReady || saving}
-                    onChange={(e) => setReviewDrafts((c) => ({ ...c, [day]: { comment: e.target.value } }))}
-                    placeholder="例：今日もよくがんばりました！計算の工夫が素晴らしいですね。"
-                  />
-                  <div className="mt-3 flex justify-end">
-                    <button
-                      type="button"
-                      className={ui.primaryButton}
-                      disabled={!dataReady || saving || !reviewCanSave}
-                      onClick={saveReview}
-                    >
-                      <Check size={16} />
-                      {saving ? '保存中…' : '確認完了として保存'}
-                    </button>
-                  </div>
-                </div>
-              </section>
-            ) : (
-              /* 生徒用ビュー */
-              <section className={ui.panel}>
-                <div className="mb-4 flex items-center justify-between gap-3">
-                  <h2 className="m-0 text-lg sm:text-xl font-extrabold tracking-tight text-ink">
-                    {day === today ? '今日の勉強' : `${day ? formatDate(day) : ''}の勉強`}
-                  </h2>
-                  {sessions.length > 0 && (
-                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-card-subtle border border-line/70 text-xs font-bold text-muted font-numbers shrink-0">
-                      <Clock size={12} className="text-primary" />
-                      {dayMinutes > 0 ? `${dayMinutes}分 · ` : ''}
-                      {sessions.length}件
-                    </span>
-                  )}
+                      </button>
+                    );
+                  })}
                 </div>
 
-                {/* 先生からの確認コメント（届いていれば上部に表示） */}
-                {entry.review?.comment && (
-                  <div className={ui.reviewReceived}>
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="flex items-center gap-1.5 font-bold text-xs text-primary">
-                        <TeacherCheckIcon size={18} />
-                        先生からのメッセージ
-                      </span>
-                      <span className="text-[11px] text-muted">
-                        {entry.review.reviewedAt ? new Intl.DateTimeFormat('ja-JP', { timeZone: 'Asia/Tokyo', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date(entry.review.reviewedAt)) : ''}
-                      </span>
+                {/* カレンダー下部サマリー */}
+                <footer className="mt-4 pt-3.5 border-t border-line/60 flex items-center justify-center gap-3 sm:gap-6 text-xs text-muted flex-wrap">
+                  <div className="flex items-center gap-1.5 text-xs text-muted">
+                    <TeacherCheckIcon size={16} />
+                    <span>確認済 {monthReviewedCount}日</span>
+                  </div>
+                  <div className="flex items-center gap-1.5 text-xs text-muted">
+                    <RecordSeal size={16} />
+                    <span>記録 {monthRecordedDays}日</span>
+                  </div>
+                  {monthTotalMinutes > 0 && (
+                    <div className="flex items-center gap-1 text-xs font-bold text-ink font-numbers">
+                      <Clock size={14} className="text-primary" />
+                      <span>合計 {formatDuration(monthTotalMinutes)}</span>
                     </div>
-                    <p className="mt-2 leading-relaxed text-sm text-ink">{entry.review.comment}</p>
+                  )}
+                </footer>
+              </section>
+            </div>
+
+            {/* 右カラム: 詳細パネル */}
+            <div className="flex flex-col gap-5 min-w-0 w-full">
+              {error && <div className="mb-4 rounded-xl border border-danger/30 bg-danger/10 p-4 text-xs font-semibold text-danger" role="alert">{error}</div>}
+              {teacherSearchError && <div className="mb-4 rounded-xl border border-danger/30 bg-danger/10 p-4 text-xs font-semibold text-danger" role="alert">{teacherSearchError}</div>}
+
+              {/* 先生用ビュー */}
+              {role === '先生' ? (
+                <section className={ui.panel}>
+                  <div className="mb-4 flex flex-wrap items-center justify-between gap-2.5">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <h2 className="m-0 text-lg sm:text-xl font-extrabold tracking-tight text-ink">
+                        {day ? formatDate(day) : ''}
+                      </h2>
+                      {sessions.length > 0 && (
+                        savedReview.reviewedAt ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-reward-soft text-reward-ink border border-reward-line/40 text-[11px] font-bold shrink-0">
+                            <Check size={11} strokeWidth={3} />
+                            確認済み
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-800 dark:text-amber-300 border border-amber-500/30 text-[11px] font-bold shrink-0">
+                            未確認
+                          </span>
+                        )
+                      )}
+                    </div>
+                    {sessions.length > 0 && (
+                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-card-subtle border border-line/70 text-xs font-bold text-muted font-numbers shrink-0">
+                        <Clock size={12} className="text-primary" />
+                        {dayMinutes > 0 ? `${formatDuration(dayMinutes)} · ` : ''}
+                        {sessions.length}件
+                      </span>
+                    )}
                   </div>
-                )}
 
-                {/* セッション一覧（入れ子カードを廃したクリーンなノート行） */}
-                {sessions.length > 0 && (
-                  <div className="divide-y divide-line/70 -mx-1">
-                    {sessions.map((session, index) => (
-                      <article
-                        className="group py-3.5 first:pt-1 last:pb-1 px-1 transition-colors"
-                        key={session.id}
-                      >
-                        {/* 上段：番号・時間 ＋ 右上に控えめなアイコン操作 */}
-                        <div className="flex items-center justify-between gap-2 mb-1.5">
-                          <div className="flex items-center gap-2">
-                            <span
-                              className="text-xs font-extrabold font-numbers text-muted"
-                              aria-hidden="true"
-                            >
-                              #{index + 1}
-                            </span>
-                            {session.minutes && (
-                              <span className="inline-flex items-center gap-1 text-xs font-bold font-numbers text-primary-ink">
-                                <Clock size={12} />
-                                {session.minutes}分
+                  {/* 先生確認コメント（一番上にコンパクト表示 ＋ ボタンでモーダル起動） */}
+                  {sessions.length > 0 && (
+                    <div className="mb-4 rounded-2xl border border-line bg-card-subtle/40 px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        {savedReview.reviewedAt ? (
+                          <>
+                            <div className="flex items-center gap-2 text-xs font-bold text-reward-ink">
+                              <Check size={13} strokeWidth={3} />
+                              <span>確認コメント</span>
+                              <span className="text-[11px] font-normal text-muted font-numbers">
+                                {new Intl.DateTimeFormat('ja-JP', { timeZone: 'Asia/Tokyo', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date(savedReview.reviewedAt))}
                               </span>
-                            )}
-                          </div>
+                            </div>
+                            <p className="m-0 mt-1 text-xs sm:text-sm text-ink whitespace-pre-wrap [overflow-wrap:anywhere]">
+                              {savedReview.comment || '（コメントなしで確認済み）'}
+                            </p>
+                          </>
+                        ) : (
+                          <p className="m-0 text-xs font-semibold text-muted">
+                            学習記録を確認したら、コメントを残して確認完了にできます。
+                          </p>
+                        )}
+                      </div>
 
-                          <div className="flex items-center gap-0.5">
-                            <button
-                              type="button"
-                              disabled={!dataReady || saving || Boolean(uploading)}
-                              onClick={() => { setShowPastComposer(true); startEdit(session); }}
-                              className="grid size-7 place-items-center rounded-lg text-muted hover:text-ink hover:bg-card-subtle transition-colors cursor-pointer disabled:opacity-40"
-                              title="編集"
-                              aria-label="編集"
-                            >
-                              <PencilLine size={14} />
-                            </button>
-                            <button
-                              type="button"
-                              disabled={!dataReady || saving || Boolean(uploading)}
-                              onClick={() => void deleteSession(session)}
-                              className="grid size-7 place-items-center rounded-lg text-muted hover:text-danger hover:bg-error-soft transition-colors cursor-pointer disabled:opacity-40"
-                              title="削除"
-                              aria-label="削除"
-                            >
-                              <Trash2 size={14} />
-                            </button>
-                          </div>
-                        </div>
+                      <button
+                        type="button"
+                        disabled={!dataReady || saving}
+                        onClick={() => {
+                          setError('');
+                          setReviewModalOpen(true);
+                        }}
+                        className={
+                          savedReview.reviewedAt
+                            ? 'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-line bg-card hover:bg-card-subtle text-xs font-bold text-ink transition-all cursor-pointer shrink-0'
+                            : 'inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-primary !text-white text-xs font-bold hover:bg-primary-hover active:scale-95 transition-all shadow-subtle cursor-pointer shrink-0'
+                        }
+                      >
+                        <PencilLine size={13} />
+                        <span>{savedReview.reviewedAt ? '編集' : '確認・コメントする'}</span>
+                      </button>
+                    </div>
+                  )}
 
-                        {/* 中段：主役の勉強内容テキスト */}
-                        <p className="m-0 text-sm sm:text-[15px] leading-relaxed text-ink whitespace-pre-wrap [overflow-wrap:anywhere]">
-                          {session.content}
-                        </p>
-
-                        {/* 下段：写真プレビューまたは写真追加ボタン */}
-                        {(session.evidencePath || canAddPhoto) && (
-                          <div className="mt-2.5 flex flex-wrap items-center gap-2.5">
-                            {session.evidencePath && (
+                  {displayedSessions.length > 0 ? (
+                    <div className="divide-y divide-line/70 -mx-1">
+                      {displayedSessions.map((session) => (
+                        <article
+                          className="py-3.5 first:pt-1 last:pb-1 px-1 transition-colors"
+                          key={session.id}
+                        >
+                          {(session.minutes || formatRecordedTime(session.createdAt)) && (
+                            <div className="flex items-center gap-2 mb-1.5">
+                              {formatRecordedTime(session.createdAt) && (
+                                <span className="text-xs font-bold font-numbers text-ink tabular-nums">
+                                  {formatRecordedTime(session.createdAt)}
+                                </span>
+                              )}
+                              {session.minutes && (
+                                <span className="inline-flex items-center gap-1 text-xs font-bold font-numbers text-primary-ink">
+                                  <Clock size={12} />
+                                  {formatDuration(session.minutes)}
+                                </span>
+                              )}
+                            </div>
+                          )}
+                          <p className="m-0 text-sm sm:text-[15px] leading-relaxed text-ink whitespace-pre-wrap [overflow-wrap:anywhere]">
+                            {session.content}
+                          </p>
+                          {session.evidencePath && (
+                            <div className="mt-2.5">
                               <EvidencePreview
                                 key={session.evidencePath}
                                 pathname={session.evidencePath}
@@ -1543,190 +1552,202 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
                                 label={session.content}
                                 onOpenPreview={(src, label) => setPreviewImage({ src, label })}
                               />
-                            )}
-                            {canAddPhoto && (
-                              <label className="relative inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-lg border border-line bg-card-subtle/50 hover:bg-card-subtle px-2.5 text-xs font-semibold text-muted hover:text-ink hover:border-line-strong transition-all">
-                                <Camera size={13} />
-                                <span>
-                                  {uploading === session.id
-                                    ? `送信中 ${uploadPercent}%`
-                                    : session.evidencePath
-                                    ? '写真を変更'
-                                    : '写真を追加'}
-                                </span>
-                                <input
-                                  type="file"
-                                  accept="image/jpeg,image/png,image/webp"
-                                  className="sr-only"
-                                  disabled={!dataReady || Boolean(uploading) || saving}
-                                  onChange={(event) => {
-                                    const file = event.target.files?.[0];
-                                    event.target.value = '';
-                                    if (!file) return;
-                                    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
-                                      setError('JPG・PNG・WebP画像を選択してください。');
-                                      return;
-                                    }
-                                    if (file.size > 15 * 1024 * 1024) {
-                                      setError('画像サイズは15MB以下にしてください。');
-                                      return;
-                                    }
-                                    setError('');
-                                    setCropTask({ mode: 'evidence', file, session });
-                                  }}
-                                />
-                              </label>
-                            )}
-                          </div>
-                        )}
-                      </article>
-                    ))}
-                  </div>
-                )}
+                            </div>
+                          )}
+                        </article>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className={ui.empty}>この日の勉強記録はまだありません。</p>
+                  )}
+                </section>
+              ) : (
+                /* 生徒用ビュー */
+                <section className={ui.panel}>
+                  <div className="mb-4 flex flex-wrap items-center justify-between gap-2.5">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <h2 className="m-0 text-lg sm:text-xl font-extrabold tracking-tight text-ink">
+                        {day === today ? '今日の勉強' : `${day ? formatDate(day) : ''}の勉強`}
+                      </h2>
+                      {sessions.length > 0 && (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-card-subtle border border-line/70 text-xs font-bold text-muted font-numbers shrink-0">
+                          <Clock size={12} className="text-primary" />
+                          {dayMinutes > 0 ? `${formatDuration(dayMinutes)} · ` : ''}
+                          {sessions.length}件
+                        </span>
+                      )}
+                    </div>
 
-                {/* 記録入力フォーム（当日、または過去の追加記録） */}
-                {canLog && (
-                  <div className={sessions.length > 0 ? "mt-6 pt-4 border-t border-line" : ""}>
-                    {sessions.length > 0 && !showPastComposer && !draft.content.trim() && !draft.id ? (
+                    {/* 上部配置の追加ボタン（モーダルを開く） */}
+                    {canLog && sessions.length > 0 && (
                       <button
                         type="button"
-                        className={ui.addSessionToggle}
-                        onClick={() => setShowPastComposer(true)}
+                        onClick={openNewComposer}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-primary !text-white text-xs font-bold hover:bg-primary-hover active:scale-95 transition-all shadow-subtle cursor-pointer shrink-0"
                       >
-                        <Plus size={16} />
-                        この日に追加で勉強を記録する
+                        <Plus size={14} strokeWidth={2.5} className="!text-white" />
+                        <span className="!text-white">{!draft.id && draft.content.trim() ? '下書きを再開' : '記録を追加'}</span>
                       </button>
-                    ) : (
-                      <div className={ui.composer}>
-                        <label className={ui.fieldLabel} htmlFor="study-content">勉強した内容</label>
-                        <textarea
-                          id="study-content"
-                          className={ui.textArea}
-                          rows={3}
-                          maxLength={1000}
-                          value={draft.content}
-                          disabled={!dataReady || saving || Boolean(uploading)}
-                          onChange={(event) => updateDraft({ content: event.target.value })}
-                          placeholder="例：算数の問題集を5ページ進めた"
-                        />
-                        <div className={ui.composerFooter}>
-                          <div className="flex flex-col gap-1 w-full sm:w-auto">
-                            <label className={ui.minutesField}>
-                              学習時間（任意）
-                              <span>
-                                <input
-                                  className={ui.minutesInput}
-                                  type="number"
-                                  min="1"
-                                  max="1440"
-                                  inputMode="numeric"
-                                  value={draft.minutes}
-                                  disabled={!dataReady || saving || Boolean(uploading)}
-                                  onChange={(event) => updateDraft({ minutes: event.target.value })}
-                                  aria-label="学習時間（分）"
-                                  placeholder="30"
-                                />分
-                              </span>
-                            </label>
-                            <div className={ui.quickMinutesList} aria-label="学習時間の目安">
-                              {QUICK_MINUTES.map((mins) => {
-                                const active = draft.minutes === String(mins);
-                                return (
-                                  <button
-                                    key={mins}
-                                    type="button"
-                                    className={`${ui.quickMinuteBtn} ${active ? ui.quickMinuteBtnActive : ''}`}
-                                    disabled={!dataReady || saving || Boolean(uploading)}
-                                    onClick={() => updateDraft({ minutes: active ? '' : String(mins) })}
-                                    aria-pressed={active}
-                                  >
-                                    {mins}分
-                                  </button>
-                                );
-                              })}
-                            </div>
-                          </div>
+                    )}
+                  </div>
 
-                          <div className={ui.formActions}>
-                            {draft.id && (
-                              <button
-                                type="button"
-                                className={ui.secondaryButton}
-                                disabled={saving || Boolean(uploading)}
-                                onClick={() => {
-                                  setDrafts((current) => { const next = { ...current }; delete next[day]; return next; });
-                                  setShowPastComposer(false);
-                                }}
-                              >
-                                <X size={16} />編集をやめる
-                              </button>
-                            )}
-                            <HoldButton
-                              size="md"
-                              radius={14}
-                              holdTime={1000}
-                              waveAmplitude={3}
-                              backgroundColor="var(--color-primary)"
-                              fillColor="var(--color-primary-hover, #0A534C)"
-                              textColor="#ffffff"
-                              fillTextColor="#ffffff"
-                              wave={true}
-                              glow={true}
-                              disabled={!dataReady || saving || Boolean(uploading) || !draft.content.trim()}
-                              onHold={() => {
-                                void saveSession().then(() => setShowPastComposer(false));
-                              }}
-                              onTap={() => {
-                                if (!draft.content.trim()) {
-                                  setError('勉強した内容を入力してください。');
-                                  return;
-                                }
-                                notify('長押しすると記録できます');
-                              }}
-                              icon={saving ? <LoaderCircle size={15} className="animate-spin" /> : <Check size={16} strokeWidth={2.4} />}
-                              doneIcon={<Check size={16} strokeWidth={2.6} />}
-                              doneLabel={draft.id ? '保存しました' : '記録しました'}
-                              className="w-full sm:w-auto font-bold text-sm tracking-wide shadow-subtle hover:shadow-card cursor-pointer"
-                            >
-                              {saving ? '保存中…' : draft.id ? '長押しで保存' : '長押しで記録'}
-                            </HoldButton>
-                          </div>
-                        </div>
+                  {/* 先生からの確認コメント（届いていれば上部に表示） */}
+                  {entry.review?.comment && (
+                    <div className={ui.reviewReceived}>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="flex items-center gap-1.5 font-bold text-xs text-primary">
+                          <TeacherCheckIcon size={18} />
+                          先生からのメッセージ
+                        </span>
+                        <span className="text-[11px] text-muted">
+                          {entry.review.reviewedAt ? new Intl.DateTimeFormat('ja-JP', { timeZone: 'Asia/Tokyo', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date(entry.review.reviewedAt)) : ''}
+                        </span>
+                      </div>
+                      <p className="mt-2 leading-relaxed text-sm text-ink">{entry.review.comment}</p>
+                    </div>
+                  )}
 
-                        {/* 保存前ポイント予告（コンパクトなアイコン表示） */}
-                        {pointPreview && (
-                          <div className="mt-3 px-3.5 py-2 rounded-xl bg-primary-soft/80 border border-primary/20 flex flex-wrap items-center justify-between gap-2 text-xs font-numbers">
-                            <div className="flex items-center gap-3 text-muted font-semibold">
-                              <span className="inline-flex items-center gap-1 text-ink">
-                                <Clock size={13} className="text-primary" />
-                                {pointPreview.timePoints}pt
-                              </span>
-                              {pointPreview.streakBonus > 0 && (
-                                <span className="inline-flex items-center gap-1 text-amber-800 dark:text-amber-300 font-bold">
-                                  <Trophy size={13} className="text-amber-700 dark:text-amber-400" />
-                                  +{pointPreview.streakBonus}pt
+                  {/* 記録がない日の空状態（モーダル起動CTA） */}
+                  {sessions.length === 0 && (
+                    <div className="py-8 px-4 text-center flex flex-col items-center gap-3">
+                      <p className="m-0 text-sm text-muted">
+                        {day === today ? '今日の勉強記録はまだありません。' : 'この日の勉強記録はまだありません。'}
+                      </p>
+                      {canLog && (
+                        <button
+                          type="button"
+                          onClick={openNewComposer}
+                          className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-primary !text-white text-sm font-bold hover:bg-primary-hover active:scale-95 transition-all shadow-subtle cursor-pointer"
+                        >
+                          <Plus size={16} strokeWidth={2.5} className="!text-white" />
+                          <span className="!text-white">{!draft.id && draft.content.trim() ? '下書きの続きから記録する' : '勉強を記録する'}</span>
+                        </button>
+                      )}
+                    </div>
+                  )}
+
+                  {/* セッション一覧（入れ子カードを廃したクリーンなノート行） */}
+                  {displayedSessions.length > 0 && (
+                    <div className="divide-y divide-line/70 -mx-1">
+                      {displayedSessions.map((session) => (
+                        <article
+                          className="group py-3.5 first:pt-1 last:pb-1 px-1 transition-colors"
+                          key={session.id}
+                        >
+                          {/* 上段：記録時刻・学習時間 ＋ 右上に控えめなアイコン操作 */}
+                          <div className="flex items-center justify-between gap-2 mb-1.5">
+                            <div className="flex items-center gap-2">
+                              {formatRecordedTime(session.createdAt) && (
+                                <span className="text-xs font-bold font-numbers text-ink tabular-nums">
+                                  {formatRecordedTime(session.createdAt)}
+                                </span>
+                              )}
+                              {session.minutes && (
+                                <span className="inline-flex items-center gap-1 text-xs font-bold font-numbers text-primary-ink">
+                                  <Clock size={12} />
+                                  {formatDuration(session.minutes)}
                                 </span>
                               )}
                             </div>
-                            <span className="inline-flex items-center gap-1 text-sm font-extrabold text-primary-ink">
-                              <Sparkles size={13} />
-                              +{pointPreview.totalPoints} pt
-                            </span>
+
+                            <div className="flex items-center gap-0.5">
+                              {canAddPhoto && (
+                                <label
+                                  className={`relative grid place-items-center rounded-lg text-muted hover:text-ink hover:bg-card-subtle transition-colors cursor-pointer ${
+                                    uploading === session.id ? 'h-7 px-1.5 text-primary' : 'size-7'
+                                  } ${!dataReady || Boolean(uploading) || saving ? 'opacity-40 pointer-events-none' : ''}`}
+                                  title={
+                                    uploading === session.id
+                                      ? `送信中 ${uploadPercent}%`
+                                      : session.evidencePath
+                                        ? '写真を変更'
+                                        : '写真を追加'
+                                  }
+                                  aria-label={session.evidencePath ? '写真を変更' : '写真を追加'}
+                                >
+                                  {uploading === session.id ? (
+                                    <span className="text-[10px] font-bold font-numbers tabular-nums">
+                                      {uploadPercent}%
+                                    </span>
+                                  ) : (
+                                    <Camera size={14} />
+                                  )}
+                                  <input
+                                    type="file"
+                                    accept="image/jpeg,image/png,image/webp"
+                                    className="sr-only"
+                                    disabled={!dataReady || Boolean(uploading) || saving}
+                                    onChange={(event) => {
+                                      const file = event.target.files?.[0];
+                                      event.target.value = '';
+                                      if (!file) return;
+                                      if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+                                        setError('JPG・PNG・WebP画像を選択してください。');
+                                        return;
+                                      }
+                                      if (file.size > 15 * 1024 * 1024) {
+                                        setError('画像サイズは15MB以下にしてください。');
+                                        return;
+                                      }
+                                      setError('');
+                                      setCropTask({ mode: 'evidence', file, session });
+                                    }}
+                                  />
+                                </label>
+                              )}
+                              <button
+                                type="button"
+                                disabled={!dataReady || saving || Boolean(uploading)}
+                                onClick={() => startEdit(session)}
+                                className="grid size-7 place-items-center rounded-lg text-muted hover:text-ink hover:bg-card-subtle transition-colors cursor-pointer disabled:opacity-40"
+                                title="編集"
+                                aria-label="編集"
+                              >
+                                <PencilLine size={14} />
+                              </button>
+                              <button
+                                type="button"
+                                disabled={!dataReady || saving || Boolean(uploading)}
+                                onClick={() => void deleteSession(session)}
+                                className="grid size-7 place-items-center rounded-lg text-muted hover:text-danger hover:bg-error-soft transition-colors cursor-pointer disabled:opacity-40"
+                                title="削除"
+                                aria-label="削除"
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            </div>
                           </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </section>
-            )}
+
+                          {/* 中段：主役の勉強内容テキスト */}
+                          <p className="m-0 text-sm sm:text-[15px] leading-relaxed text-ink whitespace-pre-wrap [overflow-wrap:anywhere]">
+                            {session.content}
+                          </p>
+
+                          {/* 下段：写真プレビュー */}
+                          {session.evidencePath && (
+                            <div className="mt-2.5">
+                              <EvidencePreview
+                                key={session.evidencePath}
+                                pathname={session.evidencePath}
+                                token={token}
+                                label={session.content}
+                                onOpenPreview={(src, label) => setPreviewImage({ src, label })}
+                              />
+                            </div>
+                          )}
+                        </article>
+                      ))}
+                    </div>
+                  )}
+                </section>
+              )}
+            </div>
           </div>
         </div>
-      </div>
       )}
 
       {/* 2. タイムラインタブ */}
-      {activeTab === 'timeline' && (
+      {currentTab === 'timeline' && (
         <TimelineView
           entries={entries}
           token={token}
@@ -1740,8 +1761,8 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
         />
       )}
 
-      {/* 3. レース（ランキング）タブ */}
-      {activeTab === 'ranking' && (
+      {/* 3. レース（ランキング）タブ（生徒のみ） */}
+      {role !== '先生' && currentTab === 'ranking' && (
         <RankingView
           token={token}
           role={role}
@@ -1750,8 +1771,8 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
         />
       )}
 
-      {/* 4. 統計タブ */}
-      {activeTab === 'stats' && (
+      {/* 4. 統計タブ（生徒のみ） */}
+      {role !== '先生' && currentTab === 'stats' && (
         <StatsView
           entries={entries}
           today={today}
@@ -1927,30 +1948,6 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
                         </div>
                       </div>
 
-                      <div>
-                        <label className="block text-xs font-medium text-muted mb-1">プリセットアイコン</label>
-                        <div className="flex gap-1.5 flex-wrap">
-                          {DEFAULT_STUDENT_ICONS.map((ic) => (
-                            <button
-                              key={ic.key}
-                              type="button"
-                              onClick={() => {
-                                setEditIcon(ic.key);
-                                setEditAvatarUrl('');
-                              }}
-                              className={`px-2.5 py-1 rounded-lg border text-xs font-bold flex items-center gap-1 transition-all cursor-pointer ${
-                                !editAvatarUrl && editIcon === ic.key
-                                  ? 'bg-primary/10 border-primary text-primary shadow-xs'
-                                  : 'bg-card border-line text-muted hover:text-ink'
-                              }`}
-                            >
-                              {renderStudentIcon(ic.key, 13)}
-                              <span>{ic.label}</span>
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-
                       <div className="flex justify-end gap-2 pt-1 border-t border-line/60">
                         <button
                           type="button"
@@ -2115,27 +2112,6 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
                   </div>
                 </div>
 
-                <div>
-                  <label className="block text-xs font-medium text-muted mb-1.5">アイコン</label>
-                  <div className="flex gap-2">
-                    {DEFAULT_STUDENT_ICONS.map((ic) => (
-                      <button
-                        key={ic.key}
-                        type="button"
-                        onClick={() => setNewStudentIcon(ic.key)}
-                        className={`px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition-all ${
-                          newStudentIcon === ic.key
-                            ? 'bg-primary/10 border-primary text-primary shadow-xs'
-                            : 'bg-card border-line text-muted hover:text-ink'
-                        }`}
-                      >
-                        {renderStudentIcon(ic.key, 14)}
-                        <span>{ic.label}</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
                 {studentModalError && (
                   <p className="text-xs text-danger">{studentModalError}</p>
                 )}
@@ -2160,18 +2136,75 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
         </div>
       )}
 
-      {/* 生徒用: プロフィール・アイコン設定モーダル */}
+      {/* 先生用: 確認コメント入力モーダル（PC: Radix Dialog / スマホ: Vaul ドロワー） */}
+      {role === '先生' && sessions.length > 0 && (
+        <TeacherReviewModal
+          open={reviewModalOpen}
+          onOpenChange={setReviewModalOpen}
+          dateLabel={day ? formatDate(day) : ''}
+          studentName={currentStudent?.name}
+          comment={reviewDraft.comment}
+          reviewedAt={savedReview.reviewedAt}
+          hasNextUnreviewed={Boolean(nextUnreviewedDate)}
+          saving={saving}
+          disabled={!dataReady}
+          canSave={reviewCanSave}
+          error={error}
+          onChangeComment={(nextComment) =>
+            setReviewDrafts((c) => ({ ...c, [day]: { comment: nextComment } }))
+          }
+          onSave={saveReview}
+        />
+      )}
+
+      {/* 勉強記録の追加・編集モーダル（PC: Radix Dialog / スマホ: Vaul ドロワー） */}
+      {role === '生徒' && canLog && (
+        <StudyComposerModal
+          open={showPastComposer}
+          onOpenChange={setShowPastComposer}
+          dateLabel={day === today ? `今日（${day ? formatDate(day) : ''}）` : day ? formatDate(day) : ''}
+          dayTotalMinutes={dayMinutes}
+          draft={draft}
+          onChangeDraft={updateDraft}
+          onSave={saveSession}
+          onCancelEdit={() => {
+            setDrafts((current) => {
+              const next = { ...current };
+              delete next[day];
+              return next;
+            });
+          }}
+          onNotify={notify}
+          onError={setError}
+          error={error}
+          saving={saving}
+          disabled={!dataReady || Boolean(uploading)}
+          pointPreview={pointPreview}
+        />
+      )}
+
+      {/* 生徒用: プロフィール・設定・アカウント切り替えモーダル */}
       {profileModalOpen && currentStudent && (
         <ProfileModal
           student={currentStudent}
           token={token}
+          theme={theme}
+          soundMuted={soundMuted}
+          monthRecordedDays={monthRecordedDays}
+          monthTotalMinutes={monthTotalMinutes}
+          onToggleTheme={toggleTheme}
+          onToggleSound={toggleSound}
+          onSwitchAccount={() => {
+            setProfileModalOpen(false);
+            handleLogout();
+          }}
           onClose={() => setProfileModalOpen(false)}
-          onUpdated={(updated) => {
+          onUpdated={(updated, message) => {
             setStudents((prev) =>
               prev.map((s) => (s.id === currentStudent.id ? { ...s, ...updated } : s))
             );
             setProfileRefreshKey((k) => k + 1);
-            notify('アイコン・プロフィールを更新しました');
+            notify(message || 'プロフィールを更新しました');
           }}
         />
       )}
@@ -2199,7 +2232,7 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
         <div
           role="dialog"
           aria-modal="true"
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-ink/70 backdrop-blur-sm"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
           onClick={() => setPreviewImage(null)}
         >
           <div
@@ -2209,7 +2242,7 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
             <button
               type="button"
               onClick={() => setPreviewImage(null)}
-              className="absolute top-4 right-4 p-2 rounded-full bg-ink/60 text-white hover:bg-ink transition-colors"
+              className="absolute top-4 right-4 p-2 rounded-full bg-black/60 text-white hover:bg-black/80 transition-colors"
               aria-label="閉じる"
             >
               <X size={18} />

@@ -20,6 +20,7 @@ import {
 import type { DayEntry } from './TimelineView';
 import CountUp from '../components/CountUp/CountUp';
 import AchievementDeck from '../components/AchievementDeck';
+import { formatDuration } from '../lib/format-duration';
 
 interface StatsViewProps {
   entries: Record<string, DayEntry>;
@@ -428,7 +429,7 @@ export default function StatsView({
                       <div className="font-bold text-ink mb-0.5">{item.fullLabel}</div>
                       <div className="flex items-center gap-2 font-numbers">
                         <span className="font-extrabold text-primary-ink text-sm">
-                          {item.minutes} 分
+                          {formatDuration(item.minutes)}
                         </span>
                         {item.isReviewed && (
                           <span className="px-1.5 py-0.5 rounded bg-reward-soft text-reward-ink text-[10px] font-bold">
@@ -493,8 +494,8 @@ export default function StatsView({
                       style={{ width: `${percent}%` }}
                     />
                   </div>
-                  <span className="w-16 text-right font-numbers font-semibold text-muted tabular-nums">
-                    {dow.minutes} 分
+                  <span className="w-20 text-right font-numbers font-semibold text-muted tabular-nums whitespace-nowrap">
+                    {formatDuration(dow.minutes)}
                   </span>
                 </div>
               );
@@ -528,7 +529,7 @@ export default function StatsView({
                         {sub.name}
                       </span>
                       <span className="text-muted font-numbers text-[11px]">
-                        <strong className="text-ink">{sub.minutes}</strong> 分（{sub.count}回 / {percent}%）
+                        <strong className="text-ink">{formatDuration(sub.minutes)}</strong>（{sub.count}回 / {percent}%）
                       </span>
                     </div>
                     <div className="h-2 w-full rounded-full bg-card-subtle border border-line/40 overflow-hidden">
