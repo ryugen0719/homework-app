@@ -9,6 +9,7 @@ import {
   Clock,
   Compass,
   Flame,
+  LoaderCircle,
   PieChart,
   Sparkles,
   Trophy,
@@ -16,12 +17,15 @@ import {
   Zap,
 } from 'lucide-react';
 import type { DayEntry } from './TimelineView';
+import CountUp from '../components/CountUp/CountUp';
+import GlareHover from '../components/GlareHover/GlareHover';
 
 interface StatsViewProps {
   entries: Record<string, DayEntry>;
   today: string;
   onRequestAllData?: () => void;
   hasLoadedAll?: boolean;
+  loadingAll?: boolean;
 }
 
 type PeriodType = 'this-month' | 'last-month' | 'last-30' | 'all';
@@ -67,57 +71,63 @@ const LEVEL_STYLES: Record<
     iconColor: string;
     barColor: string;
     stars: string;
+    glow: string;
   }
 > = {
   0: {
     label: 'Lv.0 未達成',
     pill: 'bg-card-subtle text-muted border-line',
-    border: 'border-line/70',
-    bg: 'bg-card opacity-65',
+    border: 'border-line',
+    bg: 'bg-card',
     iconBg: 'bg-card-subtle border-line',
     iconColor: 'text-muted',
-    barColor: 'bg-primary/50',
+    barColor: 'bg-primary/40',
     stars: '☆☆☆☆',
+    glow: '',
   },
   1: {
     label: 'Lv.1 ブロンズ',
-    pill: 'bg-amber-600/10 text-amber-800 dark:text-amber-300 border-amber-600/25',
-    border: 'border-amber-600/35 hover:border-amber-600/60',
-    bg: 'bg-amber-500/5 dark:bg-amber-950/20 shadow-subtle',
-    iconBg: 'bg-amber-500/15 border-amber-600/25',
-    iconColor: 'text-amber-700 dark:text-amber-400',
-    barColor: 'bg-amber-600',
+    pill: 'bg-gradient-to-r from-amber-700/15 to-orange-700/15 text-amber-900 dark:text-amber-200 border-amber-700/30 font-semibold',
+    border: 'border-amber-700/40 hover:border-amber-700/70',
+    bg: 'bg-gradient-to-br from-amber-600/10 via-card to-orange-600/5 shadow-subtle',
+    iconBg: 'bg-gradient-to-br from-amber-600/20 to-amber-700/30 border-amber-600/40 shadow-inner',
+    iconColor: 'text-amber-700 dark:text-amber-300',
+    barColor: 'bg-gradient-to-r from-amber-700 to-amber-500',
     stars: '★☆☆☆',
+    glow: 'hover:shadow-[0_4px_20px_rgba(180,83,9,0.15)]',
   },
   2: {
     label: 'Lv.2 シルバー',
-    pill: 'bg-slate-400/15 text-slate-700 dark:text-slate-200 border-slate-400/30',
-    border: 'border-slate-300 dark:border-slate-600 hover:border-slate-400',
-    bg: 'bg-slate-100/60 dark:bg-slate-900/40 shadow-subtle',
-    iconBg: 'bg-slate-200/80 dark:bg-slate-700/60 border-slate-300 dark:border-slate-600',
-    iconColor: 'text-slate-600 dark:text-slate-200',
-    barColor: 'bg-slate-500',
+    pill: 'bg-gradient-to-r from-slate-400/20 to-zinc-400/20 text-slate-800 dark:text-slate-100 border-slate-400/40 font-semibold',
+    border: 'border-slate-300 dark:border-slate-500 hover:border-slate-400 shadow-sm',
+    bg: 'bg-gradient-to-br from-slate-200/40 via-card to-zinc-200/20 dark:from-slate-800/40 dark:to-zinc-800/20 shadow-subtle',
+    iconBg: 'bg-gradient-to-br from-slate-300/60 to-slate-400/50 dark:from-slate-700/60 dark:to-slate-600/60 border-slate-400/50 shadow-inner',
+    iconColor: 'text-slate-700 dark:text-slate-100',
+    barColor: 'bg-gradient-to-r from-slate-400 via-slate-300 to-slate-500',
     stars: '★★☆☆',
+    glow: 'hover:shadow-[0_4px_20px_rgba(148,163,184,0.25)]',
   },
   3: {
     label: 'Lv.3 ゴールド',
-    pill: 'bg-amber-400/20 text-amber-900 dark:text-amber-200 border-amber-400/40',
-    border: 'border-amber-400 dark:border-amber-500 hover:border-amber-300',
-    bg: 'bg-gradient-to-br from-amber-500/10 via-amber-400/5 to-yellow-500/10 dark:from-amber-950/40 dark:to-yellow-950/20 shadow-subtle',
-    iconBg: 'bg-amber-400/25 border-amber-400/50',
-    iconColor: 'text-amber-600 dark:text-amber-300',
-    barColor: 'bg-gradient-to-r from-amber-500 to-yellow-400',
+    pill: 'bg-gradient-to-r from-amber-400/25 via-yellow-400/20 to-amber-500/25 text-amber-900 dark:text-amber-100 border-amber-400/50 font-bold shadow-xs',
+    border: 'border-amber-400/70 dark:border-amber-400 hover:border-amber-300 shadow-md',
+    bg: 'bg-gradient-to-br from-amber-500/15 via-yellow-400/10 to-amber-600/15 dark:from-amber-950/50 dark:via-yellow-950/30 dark:to-amber-900/40 shadow-subtle',
+    iconBg: 'bg-gradient-to-br from-amber-400/40 via-yellow-300/30 to-amber-500/40 border-amber-400/60 shadow-[0_2px_10px_rgba(245,158,11,0.25)]',
+    iconColor: 'text-amber-600 dark:text-amber-300 drop-shadow-sm',
+    barColor: 'bg-gradient-to-r from-amber-500 via-yellow-400 to-amber-400',
     stars: '★★★☆',
+    glow: 'hover:shadow-[0_6px_24px_rgba(245,158,11,0.3)]',
   },
   4: {
     label: 'Lv.MAX マスター',
-    pill: 'bg-cyan-500/20 text-cyan-800 dark:text-cyan-200 border-cyan-400/40 font-bold',
-    border: 'border-cyan-400 dark:border-cyan-400 hover:border-cyan-300 shadow-md',
-    bg: 'bg-gradient-to-br from-cyan-500/15 via-blue-500/10 to-indigo-500/20 dark:from-cyan-950/50 dark:to-indigo-950/50 shadow-subtle',
-    iconBg: 'bg-cyan-400/20 border-cyan-400/40',
-    iconColor: 'text-cyan-500 dark:text-cyan-300',
-    barColor: 'bg-gradient-to-r from-cyan-400 to-indigo-500',
+    pill: 'bg-gradient-to-r from-cyan-500/25 via-indigo-500/25 to-purple-500/25 text-cyan-900 dark:text-cyan-100 border-cyan-400/50 font-extrabold shadow-sm tracking-wide',
+    border: 'border-cyan-400/80 dark:border-cyan-400 hover:border-cyan-300 shadow-lg ring-1 ring-cyan-400/30',
+    bg: 'bg-gradient-to-br from-cyan-500/20 via-blue-500/15 to-purple-600/20 dark:from-cyan-950/60 dark:via-blue-950/50 dark:to-purple-950/60 shadow-md',
+    iconBg: 'bg-gradient-to-br from-cyan-400/40 via-blue-400/30 to-purple-500/40 border-cyan-300/60 shadow-[0_4px_16px_rgba(6,182,212,0.35)]',
+    iconColor: 'text-cyan-500 dark:text-cyan-300 drop-shadow-md',
+    barColor: 'bg-gradient-to-r from-cyan-400 via-sky-400 to-indigo-500',
     stars: '★★★★',
+    glow: 'hover:shadow-[0_8px_30px_rgba(6,182,212,0.35)]',
   },
 };
 
@@ -141,6 +151,7 @@ export default function StatsView({
   today,
   onRequestAllData,
   hasLoadedAll,
+  loadingAll,
 }: StatsViewProps) {
   const [period, setPeriod] = useState<PeriodType>('this-month');
   const [hoveredBar, setHoveredBar] = useState<{ date: string; minutes: number; label: string } | null>(null);
@@ -642,10 +653,11 @@ export default function StatsView({
             <button
               type="button"
               onClick={onRequestAllData}
+                disabled={loadingAll}
               className="inline-flex items-center gap-1.5 text-xs font-bold text-primary hover:text-primary-hover px-3 py-1.5 rounded-xl border border-primary/30 bg-primary-soft/60 hover:bg-primary-soft transition-all shadow-subtle w-fit active:scale-95"
             >
-              <Sparkles size={13} />
-              <span>全期間データを反映</span>
+                {loadingAll ? <LoaderCircle size={13} className="animate-spin" aria-hidden="true" /> : <Sparkles size={13} />}
+                <span>{loadingAll ? '全期間を読み込み中…' : '全期間データを反映'}</span>
             </button>
           )}
         </div>
@@ -711,14 +723,14 @@ export default function StatsView({
               <span className="text-3xl sm:text-4xl font-extrabold font-numbers tracking-tight text-ink">
                 {stats.totalMinutes >= 60 ? (
                   <>
-                    {Math.floor(stats.totalMinutes / 60)}
+                    <CountUp to={Math.floor(stats.totalMinutes / 60)} duration={0.7} trigger="load" />
                     <span className="text-base sm:text-lg font-bold text-muted ml-1 mr-2">時間</span>
-                    {stats.totalMinutes % 60}
+                    <CountUp to={stats.totalMinutes % 60} duration={0.7} trigger="load" />
                     <span className="text-base sm:text-lg font-bold text-muted ml-1">分</span>
                   </>
                 ) : (
                   <>
-                    {stats.totalMinutes}
+                    <CountUp to={stats.totalMinutes} duration={0.7} trigger="load" />
                     <span className="text-base sm:text-lg font-bold text-muted ml-1">分</span>
                   </>
                 )}
@@ -963,25 +975,17 @@ export default function StatsView({
       {/* がんばり実績バッジ（育成型レベルアップシステム） */}
       <section className="rounded-2xl border border-line bg-card p-4 sm:p-5 shadow-card space-y-4">
         {/* ヘッダー＆総合成長度 */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div>
-            <h3 className="text-base sm:text-lg font-bold text-ink flex items-center gap-2 m-0">
-              <Trophy size={18} className="text-amber-500" />
-              <span>がんばり実績バッジ（レベルアップ）</span>
-            </h3>
-            <p className="text-xs text-muted mt-0.5 m-0">
-              勉強を続けると各バッジのレベルが育っていきます！カードを押すと進化ツリーが見られます。
-            </p>
-          </div>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h3 className="text-base sm:text-lg font-bold text-ink flex items-center gap-2 m-0">
+            <Trophy size={18} className="text-amber-700 dark:text-amber-400" />
+            <span>実績バッジ</span>
+          </h3>
 
-          <div className="flex items-center gap-2 self-start sm:self-auto shrink-0">
-            <span className="text-xs font-bold px-3 py-1 rounded-full bg-amber-500/10 text-amber-800 dark:text-amber-300 border border-amber-500/20 font-numbers flex items-center gap-1.5 shadow-xs">
-              <Sparkles size={13} className="text-amber-500" />
+          <div className="flex items-center gap-2 shrink-0">
+            <span className="text-xs font-bold px-3 py-1 rounded-full bg-amber-500/12 text-amber-800 dark:text-amber-300 border border-amber-500/25 font-numbers flex items-center gap-1.5">
+              <Sparkles size={13} className="text-amber-700 dark:text-amber-400" />
               <span>
-                総合 Lv. {badges.reduce((sum, b) => sum + b.currentLevel, 0)} / {badges.length * 4}
-              </span>
-              <span className="text-muted font-normal">
-                ({Math.round((badges.reduce((sum, b) => sum + b.currentLevel, 0) / (badges.length * 4)) * 100)}%)
+                Lv.{badges.reduce((sum, b) => sum + b.currentLevel, 0)}/{badges.length * 4}
               </span>
             </span>
           </div>
@@ -1007,45 +1011,56 @@ export default function StatsView({
             const isMax = badge.currentLevel === badge.maxLevel;
 
             return (
-              <div
+              <GlareHover
                 key={badge.id}
-                role="button"
-                tabIndex={0}
-                onClick={() => setSelectedBadge(badge)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    setSelectedBadge(badge);
-                  }
-                }}
-                className={`group relative rounded-xl border p-4 flex flex-col justify-between transition-all cursor-pointer select-none text-left focus:outline-none focus:ring-2 focus:ring-primary/40 ${
-                  badge.currentLevel > 0
-                    ? `${lvlStyle.border} ${lvlStyle.bg} hover:-translate-y-0.5`
-                    : 'border-line/70 bg-card hover:border-line hover:bg-card-subtle/50 opacity-75 hover:opacity-100'
-                }`}
+                width="100%"
+                height="100%"
+                borderRadius="16px"
+                glareColor={badge.currentLevel >= 3 ? '#FDE68A' : '#FFFFFF'}
+                glareOpacity={badge.currentLevel > 0 ? 0.35 : 0.12}
+                glareAngle={-35}
+                glareSize={45}
+                transitionDuration={650}
+                className="block"
               >
+                <div
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setSelectedBadge(badge)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      setSelectedBadge(badge);
+                    }
+                  }}
+                  className={`group relative w-full h-full rounded-2xl border p-4.5 flex flex-col justify-between transition-all duration-300 cursor-pointer select-none text-left focus:outline-none focus:ring-2 focus:ring-primary/40 ${
+                    badge.currentLevel > 0
+                      ? `${lvlStyle.border} ${lvlStyle.bg} ${lvlStyle.glow} hover:-translate-y-0.5 shadow-card`
+                      : 'border-line bg-card hover:border-line-strong hover:bg-card-subtle/50'
+                  }`}
+                >
                 {/* カード上部: テーマ名＆レベルピル */}
                 <div>
-                  <div className="flex items-center justify-between gap-1 mb-2.5">
-                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border font-numbers ${lvlStyle.pill}`}>
+                  <div className="flex items-center justify-between gap-1 mb-3">
+                    <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full border font-numbers ${lvlStyle.pill}`}>
                       {lvlStyle.label}
                     </span>
-                    <span className="text-[11px] font-bold tracking-wider text-amber-500 dark:text-amber-400 font-numbers">
+                    <span className="text-xs font-bold tracking-widest text-amber-700 dark:text-amber-400 font-numbers">
                       {lvlStyle.stars}
                     </span>
                   </div>
 
-                  <div className="flex items-start gap-3">
-                    {/* アイコン */}
+                  <div className="flex items-start gap-3.5">
+                    {/* アイコン（メダル調リッチフレーム） */}
                     <span
-                      className={`size-11 shrink-0 rounded-xl flex items-center justify-center border transition-transform duration-200 group-hover:scale-105 shadow-xs ${
+                      className={`size-12 shrink-0 rounded-2xl flex items-center justify-center border transition-all duration-300 group-hover:scale-110 shadow-sm ${
                         badge.currentLevel > 0
                           ? `${lvlStyle.iconBg} ${lvlStyle.iconColor}`
                           : 'bg-card-subtle border-line text-muted'
                       }`}
                       aria-hidden="true"
                     >
-                      <BadgeIcon size={22} strokeWidth={badge.currentLevel > 0 ? 2.2 : 1.8} />
+                      <BadgeIcon size={24} strokeWidth={badge.currentLevel > 0 ? 2.4 : 1.8} />
                     </span>
 
                     {/* テーマ名と現在の称号 */}
@@ -1053,12 +1068,12 @@ export default function StatsView({
                       <h4 className="text-sm font-bold text-ink truncate m-0">
                         {badge.name}
                       </h4>
-                      <p className="text-xs font-semibold text-primary mt-0.5 m-0 truncate">
+                      <p className="text-xs font-bold text-primary mt-0.5 m-0 truncate">
                         {badge.currentTier ? badge.currentTier.title : '未点火（Lv.0）'}
                       </p>
                       <p className="text-[11px] text-muted mt-0.5 m-0 leading-tight line-clamp-1">
                         {isMax
-                          ? '最高レベル到達！真のマスターです'
+                          ? '最高峰マスター到達！'
                           : badge.nextTier
                           ? `次: Lv.${badge.nextTier.level} ${badge.nextTier.title}`
                           : ''}
@@ -1068,19 +1083,20 @@ export default function StatsView({
                 </div>
 
                 {/* カード下部: 経験値プログレスバー */}
-                <div className="mt-3.5 pt-2.5 border-t border-line/40 space-y-1">
-                  <div className="h-1.5 w-full rounded-full bg-card-subtle border border-line/40 overflow-hidden">
+                <div className="mt-4 pt-3 border-t border-line/40 space-y-1.5">
+                  <div className="h-2 w-full rounded-full bg-card-subtle border border-line/40 overflow-hidden p-0.5">
                     <div
-                      className={`h-full rounded-full transition-all duration-500 ${lvlStyle.barColor}`}
+                      className={`h-full rounded-full transition-all duration-700 ease-out shadow-xs ${lvlStyle.barColor}`}
                       style={{ width: `${Math.min(100, Math.max(5, badge.progressPercent))}%` }}
                     />
                   </div>
                   <div className="flex items-center justify-between text-[10px] text-muted font-numbers pt-0.5">
-                    <span>{isMax ? '🏆 育成完了' : `Lv.${badge.currentLevel} → Lv.${badge.currentLevel + 1}`}</span>
-                    <span className="font-semibold text-ink">{badge.progressText}</span>
+                    <span className="font-medium">{isMax ? '育成完了' : `Lv.${badge.currentLevel} → Lv.${badge.currentLevel + 1}`}</span>
+                    <span className="font-bold text-ink">{badge.progressText}</span>
                   </div>
                 </div>
-              </div>
+                </div>
+              </GlareHover>
             );
           })}
         </div>
@@ -1091,28 +1107,27 @@ export default function StatsView({
         <div
           role="dialog"
           aria-modal="true"
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-ink/40 backdrop-blur-md animate-fade-in"
           onClick={() => setSelectedBadge(null)}
         >
           <div
-            className="relative w-full max-w-lg rounded-2xl bg-white dark:bg-[#131417] border border-line p-5 sm:p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto"
-            style={{ backgroundColor: 'var(--card)' }}
+            className="relative w-full max-w-lg rounded-3xl bg-card border border-line p-6 sm:p-7 shadow-2xl space-y-5 max-h-[90vh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
           >
             {/* 閉じるボタン */}
             <button
               type="button"
               onClick={() => setSelectedBadge(null)}
-              className="absolute top-4 right-4 p-1.5 rounded-lg text-muted hover:text-ink hover:bg-card-subtle transition-colors"
+              className="absolute top-5 right-5 p-2 rounded-xl text-muted hover:text-ink hover:bg-card-subtle transition-colors"
               aria-label="閉じる"
             >
               <X size={18} />
             </button>
 
             {/* モーダルヘッダー */}
-            <div className="flex items-start gap-4 pr-6">
+            <div className="flex items-start gap-4 pr-8">
               <span
-                className={`size-14 shrink-0 rounded-2xl flex items-center justify-center border shadow-subtle ${
+                className={`size-16 shrink-0 rounded-2xl flex items-center justify-center border shadow-md ${
                   selectedBadge.currentLevel > 0
                     ? `${LEVEL_STYLES[selectedBadge.currentLevel].iconBg} ${LEVEL_STYLES[selectedBadge.currentLevel].iconColor}`
                     : 'bg-card-subtle border-line text-muted'
@@ -1120,20 +1135,20 @@ export default function StatsView({
               >
                 {(() => {
                   const Icon = selectedBadge.icon;
-                  return <Icon size={28} strokeWidth={2.2} />;
+                  return <Icon size={32} strokeWidth={2.4} />;
                 })()}
               </span>
 
               <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2 mb-1">
-                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${LEVEL_STYLES[selectedBadge.currentLevel].pill}`}>
+                <div className="flex items-center gap-2 mb-1.5">
+                  <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full border ${LEVEL_STYLES[selectedBadge.currentLevel].pill}`}>
                     {LEVEL_STYLES[selectedBadge.currentLevel].label}
                   </span>
-                  <span className="text-xs font-bold text-amber-500 dark:text-amber-400 font-numbers">
+                  <span className="text-xs font-bold text-amber-700 dark:text-amber-400 font-numbers tracking-wider">
                     {LEVEL_STYLES[selectedBadge.currentLevel].stars}
                   </span>
                 </div>
-                <h3 className="text-base sm:text-lg font-bold text-ink m-0 leading-tight">
+                <h3 className="text-lg sm:text-xl font-bold text-ink m-0 leading-tight">
                   {selectedBadge.name}
                 </h3>
                 <p className="text-xs text-muted mt-1 m-0">
@@ -1143,7 +1158,7 @@ export default function StatsView({
             </div>
 
             {/* 進捗ゲージ */}
-            <div className="rounded-xl bg-card-subtle/80 border border-line/60 p-3.5 space-y-2">
+            <div className="rounded-2xl bg-card-subtle/80 border border-line/60 p-4 space-y-2.5">
               <div className="flex items-center justify-between text-xs">
                 <span className="font-semibold text-ink flex items-center gap-1.5">
                   <Clock size={14} className="text-primary" />
@@ -1153,22 +1168,22 @@ export default function StatsView({
                   {selectedBadge.progressText}
                 </span>
               </div>
-              <div className="h-2 w-full rounded-full bg-card border border-line/50 overflow-hidden">
+              <div className="h-2.5 w-full rounded-full bg-card border border-line/50 overflow-hidden p-0.5">
                 <div
-                  className={`h-full rounded-full transition-all duration-500 ${LEVEL_STYLES[selectedBadge.currentLevel].barColor}`}
+                  className={`h-full rounded-full transition-all duration-700 ease-out shadow-xs ${LEVEL_STYLES[selectedBadge.currentLevel].barColor}`}
                   style={{ width: `${Math.min(100, Math.max(5, selectedBadge.progressPercent))}%` }}
                 />
               </div>
             </div>
 
             {/* 進化ツリー（Lv.1〜Lv.4のロードマップ） */}
-            <div className="space-y-2 pt-1">
+            <div className="space-y-2.5 pt-1">
               <h4 className="text-xs font-bold text-ink m-0 flex items-center gap-1.5">
-                <Award size={14} className="text-amber-500" />
-                <span>進化ロードマップ（Lv.1 〜 Lv.MAX）</span>
+                <Award size={15} className="text-amber-700 dark:text-amber-400" />
+                <span>進化ロードマップ</span>
               </h4>
 
-              <div className="space-y-2">
+              <div className="space-y-2.5">
                 {selectedBadge.tiers.map((tier) => {
                   const isUnlocked = selectedBadge.currentLevel >= tier.level;
                   const isCurrent = selectedBadge.currentLevel === tier.level;
@@ -1178,22 +1193,22 @@ export default function StatsView({
                   return (
                     <div
                       key={tier.level}
-                      className={`rounded-xl border p-3 flex items-start gap-3 transition-colors ${
+                      className={`rounded-2xl border p-3.5 flex items-start gap-3.5 transition-all ${
                         isCurrent
-                          ? `${tierStyle.border} ${tierStyle.bg} ring-1 ring-primary/30`
+                          ? `${tierStyle.border} ${tierStyle.bg} ring-2 ring-primary/30 shadow-subtle`
                           : isUnlocked
-                          ? 'border-line/60 bg-card/60'
+                          ? 'border-line/70 bg-card/80'
                           : isNext
-                          ? 'border-primary/40 bg-primary-soft/30'
-                          : 'border-line/40 bg-card-subtle/40 opacity-60'
+                          ? 'border-primary/40 bg-primary/5'
+                          : 'border-line bg-card-subtle/60'
                       }`}
                     >
                       <span
-                        className={`size-7 shrink-0 rounded-lg flex items-center justify-center text-xs font-bold font-numbers border ${
+                        className={`size-8 shrink-0 rounded-xl flex items-center justify-center text-xs font-bold font-numbers border shadow-xs ${
                           isUnlocked
                             ? `${tierStyle.iconBg} ${tierStyle.iconColor}`
                             : isNext
-                            ? 'bg-primary-soft text-primary-ink border-primary/30'
+                            ? 'bg-primary/10 text-primary border-primary/30'
                             : 'bg-card border-line text-muted'
                         }`}
                       >
@@ -1206,17 +1221,17 @@ export default function StatsView({
                             Lv.{tier.level} {tier.title}
                           </h5>
                           {isCurrent && (
-                            <span className="text-[10px] font-bold text-primary-ink px-1.5 py-0.2 rounded bg-primary-soft border border-primary/20 shrink-0">
+                            <span className="text-[10px] font-bold text-primary px-2 py-0.5 rounded-full bg-primary/10 border border-primary/20 shrink-0">
                               現在地
                             </span>
                           )}
                           {isNext && (
-                            <span className="text-[10px] font-bold text-amber-600 dark:text-amber-400 shrink-0">
-                              ▶ 次の目標
+                            <span className="text-[10px] font-bold text-amber-800 dark:text-amber-300 shrink-0">
+                              次の目標
                             </span>
                           )}
                         </div>
-                        <p className="text-[11px] text-muted mt-0.5 m-0">
+                        <p className="text-[11px] text-muted mt-1 m-0">
                           {tier.condition}
                         </p>
                       </div>
@@ -1227,9 +1242,9 @@ export default function StatsView({
             </div>
 
             {/* 学習アドバイザーからのワンポイント */}
-            <div className="rounded-xl border border-primary/20 bg-primary-soft/40 p-3.5 space-y-1">
-              <div className="flex items-center gap-1.5 text-xs font-bold text-primary-ink">
-                <Sparkles size={14} className="text-primary" />
+            <div className="rounded-2xl border border-primary/20 bg-primary/5 p-4 space-y-1.5">
+              <div className="flex items-center gap-1.5 text-xs font-bold text-primary">
+                <Sparkles size={14} />
                 <span>学習アドバイザーからの育成のヒント</span>
               </div>
               <p className="text-xs text-ink leading-relaxed m-0">
@@ -1240,11 +1255,11 @@ export default function StatsView({
             </div>
 
             {/* モーダル下部閉じるボタン */}
-            <div className="pt-1 flex justify-end">
+            <div className="pt-2 flex justify-end">
               <button
                 type="button"
                 onClick={() => setSelectedBadge(null)}
-                className="px-4 py-2 rounded-xl bg-primary text-white text-xs font-bold hover:bg-primary-hover active:scale-95 transition-all shadow-subtle"
+                className="px-5 py-2.5 rounded-xl bg-primary text-white text-xs font-bold hover:bg-primary-hover active:scale-95 transition-all shadow-subtle"
               >
                 とじる
               </button>

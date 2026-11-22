@@ -14,6 +14,7 @@ import {
   Image as ImageIcon,
   LayoutGrid,
   ListFilter,
+  LoaderCircle,
   MessageCircle,
   Search,
   Sparkles,
@@ -49,6 +50,7 @@ interface TimelineViewProps {
   onOpenPreview: (src: string, label: string) => void;
   onRequestAllData?: () => void;
   hasLoadedAll?: boolean;
+  loadingAll?: boolean;
 }
 
 function formatDateFull(dateStr: string) {
@@ -143,9 +145,9 @@ function TimelineInlinePhoto({
 
   if (status === 'loading' || !src) {
     return (
-      <div className="w-full h-44 rounded-xl bg-card-subtle animate-pulse flex items-center justify-center text-xs text-muted border border-line">
-        <span className="flex items-center gap-1.5 opacity-60">
-          <ImageIcon size={16} />
+      <div className="w-full h-44 rounded-xl bg-card-subtle flex items-center justify-center text-xs text-muted border border-line" role="status">
+        <span className="flex items-center gap-1.5">
+          <LoaderCircle size={16} className="animate-spin" aria-hidden="true" />
           写真読み込み中…
         </span>
       </div>
@@ -178,6 +180,7 @@ export default function TimelineView({
   onOpenPreview,
   onRequestAllData,
   hasLoadedAll,
+  loadingAll,
 }: TimelineViewProps) {
   const [displayMode, setDisplayMode] = useState<'stream' | 'gallery'>('stream');
   const [searchQuery, setSearchQuery] = useState('');
@@ -329,10 +332,11 @@ export default function TimelineView({
               <button
                 type="button"
                 onClick={onRequestAllData}
+                disabled={loadingAll}
                 className="inline-flex items-center gap-1.5 text-xs font-bold text-primary hover:text-primary-hover px-3 py-1.5 rounded-xl border border-primary/30 bg-primary-soft/60 hover:bg-primary-soft transition-all shadow-subtle w-fit active:scale-95"
               >
-                <Sparkles size={13} />
-                <span>全期間を取得</span>
+                {loadingAll ? <LoaderCircle size={13} className="animate-spin" aria-hidden="true" /> : <Sparkles size={13} />}
+                <span>{loadingAll ? '全期間を読み込み中…' : '全期間を取得'}</span>
               </button>
             )}
           </div>
@@ -455,10 +459,10 @@ export default function TimelineView({
 
       {/* コンテンツエリア */}
       {filteredDays.length === 0 ? (
-        <div className="rounded-2xl border border-line bg-card p-12 text-center text-muted shadow-card">
-          <Clock size={36} className="mx-auto mb-3 opacity-30 text-muted" />
-          <h3 className="text-sm sm:text-base font-bold text-ink mb-1">記録が見つかりませんでした</h3>
-          <p className="text-xs sm:text-sm max-w-sm mx-auto mb-4">
+        <div className="rounded-2xl border border-line bg-card p-10 sm:p-14 text-center shadow-card">
+          <Clock size={40} className="mx-auto mb-3 opacity-40 text-muted" />
+          <h3 className="text-base sm:text-lg font-bold text-ink mb-2">記録が見つかりませんでした</h3>
+          <p className="text-xs sm:text-sm max-w-md mx-auto mb-6 text-ink/75 leading-relaxed">
             {allDaysWithRecords.length === 0
               ? 'まだ勉強記録がありません。カレンダー画面から今日の学びを記録してみましょう！'
               : '検索条件に一致する記録がありません。フィルターを変更してみてください。'}
@@ -467,10 +471,10 @@ export default function TimelineView({
             <button
               type="button"
               onClick={() => onSelectDate(today)}
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-primary text-white text-xs sm:text-sm font-bold shadow-subtle hover:bg-primary-hover transition-all active:scale-95"
+              className="inline-flex items-center gap-2.5 px-6 py-3 rounded-2xl bg-[#0D4B43] dark:bg-primary text-white text-sm sm:text-base font-bold shadow-md hover:bg-[#083E38] dark:hover:bg-primary-hover hover:shadow-lg transition-all active:scale-95 cursor-pointer ring-1 ring-black/10 dark:ring-white/10"
             >
-              <Calendar size={14} />
-              カレンダーで今日の勉強を記録する
+              <Calendar size={18} className="text-white shrink-0" />
+              <span className="tracking-wide">カレンダーで今日の勉強を記録する</span>
             </button>
           )}
         </div>
@@ -517,7 +521,7 @@ export default function TimelineView({
                     <button
                       type="button"
                       onClick={() => onSelectDate(photo.date)}
-                      className="text-primary hover:underline font-semibold flex items-center gap-1 text-[11px]"
+                      className="text-[#0D4B43] dark:text-primary-ink hover:underline font-bold flex items-center gap-1 text-[11px]"
                     >
                       <ExternalLink size={11} />
                       カレンダー
@@ -573,7 +577,7 @@ export default function TimelineView({
                     <button
                       type="button"
                       onClick={() => onSelectDate(dayItem.date)}
-                      className="inline-flex items-center gap-1 text-xs font-semibold text-primary hover:text-primary-hover transition-colors"
+                      className="inline-flex items-center gap-1 text-xs font-bold text-[#0D4B43] dark:text-primary-ink hover:underline transition-colors"
                       title="この日をカレンダーで開いて編集・確認する"
                     >
                       <span>カレンダーで開く</span>

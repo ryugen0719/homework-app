@@ -1,5 +1,6 @@
 @import url("https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&family=Noto+Sans+JP:wght@400;500;600;700&display=swap");
 @import 'tailwindcss';
+@custom-variant dark (&:where([data-theme=dark], [data-theme=dark] *));
 
 :root,
 html[data-theme="light"] {
@@ -8,10 +9,10 @@ html[data-theme="light"] {
   --card: #FFFFFF;
   --card-subtle: #F1F3F5;
   --line: #E7E5E4;
-  --line-strong: #DEE2E6;
+  --line-strong: #D6D3D1;
   --text: #1C1917;
-  --text-sub: #495057;
-  --text-faint: #868E96;
+  --text-sub: #44403C;
+  --text-faint: #64748B;
 
   --primary: #0D5C52;
   --primary-soft: #E7F4F1;
