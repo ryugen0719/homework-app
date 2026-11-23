@@ -779,7 +779,6 @@ export default function Home() {
   }
 
   function openNewComposer() {
-    playAppSound('breeze');
     if (draft.id) {
       setDrafts((current) => { const next = { ...current }; delete next[day]; return next; });
     }
@@ -791,7 +790,7 @@ export default function Home() {
     if (live.busy) return;
     const ok = await live.start();
     if (ok) {
-      playAppSound('breeze');
+      playAppSound('uplink');
       notify('勉強タイマーを開始しました');
     } else {
       setError('タイマーを開始できませんでした。通信状況を確認してください。');
@@ -858,7 +857,6 @@ export default function Home() {
     }));
     setPendingLiveMeta({ startedAt: result.startedAt, endedAt: result.endedAt });
     setError('');
-    playAppSound('breeze');
     setShowPastComposer(true);
   }
 
@@ -1279,7 +1277,6 @@ export default function Home() {
                 <button
                   type="button"
                   onClick={() => {
-                    playAppSound('breeze');
                     setProfileModalOpen(true);
                   }}
                   className="inline-flex items-center gap-2 p-1 sm:pr-3 rounded-full bg-card hover:bg-card-subtle text-xs font-bold text-ink shadow-subtle transition-all cursor-pointer active:scale-95 max-w-[160px] sm:max-w-[200px]"
@@ -1372,7 +1369,6 @@ export default function Home() {
                 value={currentTab}
                 onChange={(val) => {
                   const next = val as 'calendar' | 'timeline';
-                  playAppSound('tab');
                   setActiveTab(next);
                   if (next === 'timeline' && !hasLoadedAll) {
                     void loadAllData();
@@ -1436,7 +1432,6 @@ export default function Home() {
             value={currentTab}
             onChange={(val) => {
               const next = val as 'calendar' | 'timeline' | 'ranking' | 'stats';
-              playAppSound('tab');
               setActiveTab(next);
               if ((next === 'timeline' || next === 'stats') && !hasLoadedAll) {
                 void loadAllData();
@@ -1463,7 +1458,6 @@ export default function Home() {
             <LivePresencePill
               members={live.otherRunningMembers}
               onClick={() => {
-                playAppSound('tab');
                 setActiveTab('ranking');
               }}
             />
@@ -1994,8 +1988,14 @@ export default function Home() {
           theme={theme}
           onToggleTheme={toggleTheme}
           onStartLive={() => void handleStartLiveStudy()}
-          onPauseLive={() => void live.pause()}
-          onResumeLive={() => void live.resume()}
+          onPauseLive={() => {
+            playAppSound('unclasp');
+            void live.pause();
+          }}
+          onResumeLive={() => {
+            playAppSound('clasp');
+            void live.resume();
+          }}
           onFinishLive={() => void handleFinishLiveStudy()}
         />
       )}
@@ -2406,12 +2406,17 @@ export default function Home() {
           elapsedSec={live.myElapsedSec}
           busy={live.busy}
           showRaceShortcut={currentTab !== 'ranking'}
-          onPause={() => void live.pause()}
-          onResume={() => void live.resume()}
+          onPause={() => {
+            playAppSound('unclasp');
+            void live.pause();
+          }}
+          onResume={() => {
+            playAppSound('clasp');
+            void live.resume();
+          }}
           onFinish={() => void handleFinishLiveStudy()}
           onCancel={handleCancelLiveStudy}
           onOpenRace={() => {
-            playAppSound('tab');
             setActiveTab('ranking');
           }}
         />

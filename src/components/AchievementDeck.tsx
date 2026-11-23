@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import type { DayEntry } from '../app/TimelineView';
 import FlipCard from './FlipCard/FlipCard';
+import { playAppSound } from './sounds';
 
 interface AchievementDeckProps {
   entries: Record<string, DayEntry>;
@@ -596,6 +597,9 @@ export default function AchievementDeck({
                   tiltMax={10}
                   hoverScale={1.02}
                   ariaLabel={`${card.name}（${theme.label}）`}
+                  onFlipChange={(flipped) => {
+                    playAppSound('cardFlip', { pitch: flipped ? 0 : -2 });
+                  }}
                   front={frontFace}
                   back={backFace}
                 />

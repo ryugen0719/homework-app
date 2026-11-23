@@ -29,6 +29,7 @@ import CountUp from '../components/CountUp/CountUp';
 import GlideSelect from '../components/GlideSelect/GlideSelect';
 import DateRangePicker from '../components/DateRangePicker';
 import RaceFullscreenOverlay from '../components/RaceFullscreenOverlay';
+import { playAppSound } from '../components/sounds';
 import { formatDuration } from '../lib/format-duration';
 import {
   computeInterpolatedSec,
@@ -118,6 +119,8 @@ interface RankingData {
     role: 'teacher' | 'student';
     studentId?: string;
     rankingOptOut?: boolean;
+    weeklyGoalMinutes?: number;
+    weeklyGoalPoints?: number;
   };
 }
 
@@ -694,8 +697,8 @@ export default function RankingView({
   const hasAnyScore = standings.some((m) => m.hasScore);
   const topVal = standings[0]?.metricValue ?? 0;
   const effectivePeriod: RankingPeriod = isDetailView ? 'last-week' : period;
-  const savedWeeklyGoalMinutes = group.weeklyGoalMinutes ?? 120;
-  const savedWeeklyGoalPoints = group.weeklyGoalPoints ?? 100;
+  const savedWeeklyGoalMinutes = displayData.currentUser?.weeklyGoalMinutes ?? group.weeklyGoalMinutes ?? 120;
+  const savedWeeklyGoalPoints = displayData.currentUser?.weeklyGoalPoints ?? group.weeklyGoalPoints ?? 100;
   const { scaleValue, goalValue, isGoalExceeded } = computeTrackScale(
     topVal,
     metric,
@@ -755,6 +758,7 @@ export default function RankingView({
         }
       }
       setShowGoalEditor(false);
+      playAppSound('heart');
       await loadSnapshot({ showError: true });
     } catch {
       setGoalError('通信エラーが発生しました');
@@ -1026,7 +1030,7 @@ export default function RankingView({
             type="button"
             onClick={openGoalEditor}
             aria-expanded={showGoalEditor}
-            title="クラスの週間目標を変更"
+            title="自分の週間目標を変更"
             className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold font-numbers transition-all cursor-pointer active:scale-95 focus-visible:outline-2 focus-visible:outline-primary ${
               showGoalEditor
                 ? 'border-primary/40 bg-primary-soft text-primary-ink'
@@ -1066,10 +1070,10 @@ export default function RankingView({
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-1.5 text-xs font-extrabold text-ink">
                 <Target size={14} className="text-primary" />
-                <span>クラスの週間目標を設定</span>
+                <span>{isStudent ? 'あなたの週間目標を設定' : '表示用の週間目標を設定'}</span>
               </div>
               <span className="text-[11px] text-muted">
-                月間などは自動で3倍スケールになります
+                個人設定・月間などは自動で3倍になります
               </span>
             </div>
 

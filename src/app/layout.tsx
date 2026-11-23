@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from 'next';
 import { Toaster } from 'sonner';
+import AppSoundProvider from '../components/sounds/AppSoundProvider';
 import './globals.css';
 export const metadata: Metadata = {
   title: '宿題ノート',
@@ -20,9 +21,10 @@ export default function RootLayout({ children }: LayoutProps<'/'>) {
         />
       </head>
       <body>
-        {children}
+        <AppSoundProvider>{children}</AppSoundProvider>
         <Toaster
-          position="bottom-center"
+          position="top-center"
+          offset={16}
           toastOptions={{
             className: '!rounded-xl !border !border-line !bg-card !text-ink !shadow-card !font-sans !text-xs sm:!text-sm !font-semibold',
           }}

@@ -177,14 +177,25 @@ export async function GET(request: NextRequest) {
     let teacherId = auth.role === 'teacher' ? auth.teacherId : auth.teacherId || 'default-teacher';
     const currentStudentId = auth.role === 'student' ? auth.studentId : '';
 
-    // 生徒本人の情報取得
+    // 生徒本人または先生の個人設定を取得
     let studentOptOut = false;
+    let userGoalMinutesRaw: unknown = undefined;
+    let userGoalPointsRaw: unknown = undefined;
     if (auth.role === 'student') {
       const studentDoc = await db.collection('students').doc(auth.studentId).get();
       if (studentDoc.exists) {
         const sData = studentDoc.data() || {};
         studentOptOut = Boolean(sData.rankingOptOut);
         if (sData.teacherId) teacherId = sData.teacherId;
+        userGoalMinutesRaw = sData.weeklyGoalMinutes;
+        userGoalPointsRaw = sData.weeklyGoalPoints;
+      }
+    } else {
+      const teacherDoc = await db.collection('settings').doc('teacher').get();
+      if (teacherDoc.exists) {
+        const tData = teacherDoc.data() || {};
+        userGoalMinutesRaw = tData.weeklyGoalMinutes;
+        userGoalPointsRaw = tData.weeklyGoalPoints;
       }
     }
 
@@ -467,20 +478,17 @@ export async function GET(request: NextRequest) {
       };
     });
 
+    const parseGoal = (raw: unknown, min: number, max: number): number | null =>
+      typeof raw === 'number' && Number.isInteger(raw) && raw >= min && raw <= max ? raw : null;
+
     const weeklyGoalMinutes =
-      typeof groupData.weeklyGoalMinutes === 'number' &&
-      Number.isInteger(groupData.weeklyGoalMinutes) &&
-      groupData.weeklyGoalMinutes >= 30 &&
-      groupData.weeklyGoalMinutes <= 1800
-        ? groupData.weeklyGoalMinutes
-        : 120;
+      parseGoal(userGoalMinutesRaw, 30, 1800) ??
+      parseGoal(groupData.weeklyGoalMinutes, 30, 1800) ??
+      120;
     const weeklyGoalPoints =
-      typeof groupData.weeklyGoalPoints === 'number' &&
-      Number.isInteger(groupData.weeklyGoalPoints) &&
-      groupData.weeklyGoalPoints >= 30 &&
-      groupData.weeklyGoalPoints <= 2000
-        ? groupData.weeklyGoalPoints
-        : 100;
+      parseGoal(userGoalPointsRaw, 30, 2000) ??
+      parseGoal(groupData.weeklyGoalPoints, 30, 2000) ??
+      100;
 
     return json({
       serverNow,
@@ -505,6 +513,8 @@ export async function GET(request: NextRequest) {
         role: auth.role,
         studentId: currentStudentId,
         rankingOptOut: studentOptOut,
+        weeklyGoalMinutes,
+        weeklyGoalPoints,
       },
     });
   } catch (error) {
@@ -599,22 +609,8 @@ export async function POST(request: NextRequest) {
     return json({ success: true, group: { id: newGroupId, ...newGroupData } });
   }
 
-  // 4. グループの週間目標（時間・ポイント）を更新
+  // 4. 個人の週間目標（時間・ポイント）を更新
   if (action === 'update-goal') {
-    let teacherId = auth.role === 'teacher' ? auth.teacherId : auth.teacherId || 'default-teacher';
-    if (auth.role === 'student') {
-      const sDoc = await db.collection('students').doc(auth.studentId).get();
-      if (sDoc.exists) {
-        const sData = sDoc.data() || {};
-        if (sData.teacherId) teacherId = sData.teacherId;
-      }
-    }
-
-    const groupsSnap = await db.collection('groups').where('teacherId', '==', teacherId).limit(1).get();
-    if (groupsSnap.empty) {
-      return respondError('グループが見つかりません', 404);
-    }
-
     const updates: Record<string, unknown> = {
       updatedAt: new Date().toISOString(),
     };
@@ -639,7 +635,12 @@ export async function POST(request: NextRequest) {
       return respondError('変更する目標値を指定してください', 400);
     }
 
-    await groupsSnap.docs[0].ref.set(updates, { merge: true });
+    const targetRef =
+      auth.role === 'student'
+        ? db.collection('students').doc(auth.studentId)
+        : db.collection('settings').doc('teacher');
+    await targetRef.set(updates, { merge: true });
+
     return json({
       success: true,
       weeklyGoalMinutes: updates.weeklyGoalMinutes,
