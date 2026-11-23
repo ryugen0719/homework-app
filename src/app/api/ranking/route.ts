@@ -7,6 +7,7 @@ import {
   computeLiveTimerState,
   database,
   ensureDefaultStudent,
+  LIVE_STALE_HIDE_AFTER_SEC,
   LiveTimerDoc,
   MAX_MEMBERS_PER_GROUP,
   offsetDateJst,
@@ -313,7 +314,7 @@ export async function GET(request: NextRequest) {
           let hideStale = false;
           if (!isMe && state.isStale) {
             const hbMs = Date.parse(state.lastHeartbeatAt || state.startedAt);
-            if (!Number.isNaN(hbMs) && nowMs - hbMs > 45 * 60 * 1000) {
+            if (!Number.isNaN(hbMs) && nowMs - hbMs > LIVE_STALE_HIDE_AFTER_SEC * 1000) {
               hideStale = true;
             }
           }
@@ -466,12 +467,29 @@ export async function GET(request: NextRequest) {
       };
     });
 
+    const weeklyGoalMinutes =
+      typeof groupData.weeklyGoalMinutes === 'number' &&
+      Number.isInteger(groupData.weeklyGoalMinutes) &&
+      groupData.weeklyGoalMinutes >= 30 &&
+      groupData.weeklyGoalMinutes <= 1800
+        ? groupData.weeklyGoalMinutes
+        : 120;
+    const weeklyGoalPoints =
+      typeof groupData.weeklyGoalPoints === 'number' &&
+      Number.isInteger(groupData.weeklyGoalPoints) &&
+      groupData.weeklyGoalPoints >= 30 &&
+      groupData.weeklyGoalPoints <= 2000
+        ? groupData.weeklyGoalPoints
+        : 100;
+
     return json({
       serverNow,
       group: {
         id: groupId,
         name: groupData.name || 'クラスレース',
         inviteCode: auth.role === 'teacher' ? groupData.inviteCode : undefined,
+        weeklyGoalMinutes,
+        weeklyGoalPoints,
       },
       period,
       rangeStart,
@@ -579,6 +597,54 @@ export async function POST(request: NextRequest) {
 
     await db.collection('groups').doc(newGroupId).set(newGroupData);
     return json({ success: true, group: { id: newGroupId, ...newGroupData } });
+  }
+
+  // 4. グループの週間目標（時間・ポイント）を更新
+  if (action === 'update-goal') {
+    let teacherId = auth.role === 'teacher' ? auth.teacherId : auth.teacherId || 'default-teacher';
+    if (auth.role === 'student') {
+      const sDoc = await db.collection('students').doc(auth.studentId).get();
+      if (sDoc.exists) {
+        const sData = sDoc.data() || {};
+        if (sData.teacherId) teacherId = sData.teacherId;
+      }
+    }
+
+    const groupsSnap = await db.collection('groups').where('teacherId', '==', teacherId).limit(1).get();
+    if (groupsSnap.empty) {
+      return respondError('グループが見つかりません', 404);
+    }
+
+    const updates: Record<string, unknown> = {
+      updatedAt: new Date().toISOString(),
+    };
+
+    if (body.weeklyGoalMinutes !== undefined) {
+      const mins = Number(body.weeklyGoalMinutes);
+      if (!Number.isInteger(mins) || mins < 30 || mins > 1800) {
+        return respondError('目標時間は30分〜30時間（1800分）の範囲で指定してください', 400);
+      }
+      updates.weeklyGoalMinutes = mins;
+    }
+
+    if (body.weeklyGoalPoints !== undefined) {
+      const pts = Number(body.weeklyGoalPoints);
+      if (!Number.isInteger(pts) || pts < 30 || pts > 2000) {
+        return respondError('目標ポイントは30〜2000ptの範囲で指定してください', 400);
+      }
+      updates.weeklyGoalPoints = pts;
+    }
+
+    if (updates.weeklyGoalMinutes === undefined && updates.weeklyGoalPoints === undefined) {
+      return respondError('変更する目標値を指定してください', 400);
+    }
+
+    await groupsSnap.docs[0].ref.set(updates, { merge: true });
+    return json({
+      success: true,
+      weeklyGoalMinutes: updates.weeklyGoalMinutes,
+      weeklyGoalPoints: updates.weeklyGoalPoints,
+    });
   }
 
   return respondError('不明な操作です', 400);

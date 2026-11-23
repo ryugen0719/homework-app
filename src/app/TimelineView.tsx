@@ -540,13 +540,13 @@ export default function TimelineView({
                     />
                     <div className="mt-2.5">
                       <div className="flex items-start justify-between gap-2">
-                        <p className="text-xs sm:text-sm font-semibold text-ink line-clamp-2 m-0 min-w-0">
+                        <p className="text-xs sm:text-sm font-semibold text-ink line-clamp-2 m-0 min-w-0 select-text">
                           {photo.content}
                         </p>
                         <SubjectBadge content={photo.content} className="mt-0.5" />
                       </div>
                       {photo.reviewComment && (
-                        <p className="mt-1.5 text-xs text-reward-ink bg-reward-soft/55 p-2 rounded-lg line-clamp-2 m-0">
+                        <p className="mt-1.5 text-xs text-reward-ink bg-reward-soft/55 p-2 rounded-lg line-clamp-2 m-0 select-text">
                           先生: {photo.reviewComment}
                         </p>
                       )}
@@ -652,7 +652,7 @@ export default function TimelineView({
                         {/* 勉強内容と提出写真（教科バッジは内容の横に配置して縦スペースを消費しない） */}
                         <div className="min-w-0 flex flex-col gap-2">
                           <div className="flex items-start justify-between gap-2.5">
-                            <p className="text-sm sm:text-[15px] leading-relaxed text-ink whitespace-pre-wrap break-words m-0 font-normal min-w-0">
+                            <p className="text-sm sm:text-[15px] leading-relaxed text-ink whitespace-pre-wrap break-words m-0 font-normal min-w-0 select-text">
                               {session.content}
                             </p>
                             <SubjectBadge content={session.content} className="mt-1" />
@@ -688,7 +688,7 @@ export default function TimelineView({
                         {formatTime(dayItem.review?.reviewedAt)}
                       </span>
                     </div>
-                    <p className="text-xs sm:text-sm leading-relaxed text-ink m-0 whitespace-pre-wrap pl-8">
+                    <p className="text-xs sm:text-sm leading-relaxed text-ink m-0 whitespace-pre-wrap pl-8 select-text">
                       {dayItem.review?.comment}
                     </p>
                   </div>

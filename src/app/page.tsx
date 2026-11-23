@@ -1731,7 +1731,7 @@ export default function Home() {
                             )}
                             <SubjectBadge content={session.content} />
                           </div>
-                          <p className="m-0 text-sm sm:text-[15px] leading-relaxed text-ink whitespace-pre-wrap [overflow-wrap:anywhere]">
+                          <p className="m-0 text-sm sm:text-[15px] leading-relaxed text-ink whitespace-pre-wrap [overflow-wrap:anywhere] select-text">
                             {session.content}
                           </p>
                           {session.evidencePath && (
@@ -1808,7 +1808,7 @@ export default function Home() {
                           {entry.review.reviewedAt ? new Intl.DateTimeFormat('ja-JP', { timeZone: 'Asia/Tokyo', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date(entry.review.reviewedAt)) : ''}
                         </span>
                       </div>
-                      <p className="mt-2 leading-relaxed text-sm text-ink">{entry.review.comment}</p>
+                      <p className="mt-2 leading-relaxed text-sm text-ink select-text">{entry.review.comment}</p>
                     </div>
                   )}
 
@@ -1938,7 +1938,7 @@ export default function Home() {
                           </div>
 
                           {/* 中段：主役の勉強内容テキスト */}
-                          <p className="m-0 text-sm sm:text-[15px] leading-relaxed text-ink whitespace-pre-wrap [overflow-wrap:anywhere]">
+                          <p className="m-0 text-sm sm:text-[15px] leading-relaxed text-ink whitespace-pre-wrap [overflow-wrap:anywhere] select-text">
                             {session.content}
                           </p>
 
@@ -2219,11 +2219,11 @@ export default function Home() {
                           <span className="text-xs text-muted">（表示名: {student.displayName}）</span>
                         </div>
                         <div className="flex flex-wrap items-center gap-2.5 mt-1">
-                          <span className="text-[11px] text-muted font-mono">ID: {student.id}</span>
+                          <span className="text-[11px] text-muted font-mono select-text">ID: {student.id}</span>
                           <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-card border border-line/80 text-xs">
                             <KeyRound size={11} className="text-muted shrink-0" aria-hidden="true" />
                             <span className="text-muted text-[11px] font-semibold">PW:</span>
-                            <span className="font-mono font-bold text-ink">
+                            <span className="font-mono font-bold text-ink select-text">
                               {showPlainPasswordMap[student.id] ? (student.passwordPlain || '1234') : '••••'}
                             </span>
                             <button

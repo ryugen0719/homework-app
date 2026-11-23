@@ -14,6 +14,8 @@ export interface LiveTimerState {
   lastHeartbeatAt: string;
   isStale: boolean;
   isCapped: boolean;
+  autoPausedReason?: 'stale' | 'capped' | null;
+  offlineSince?: string | null;
 }
 
 export interface LiveMember {
@@ -42,6 +44,25 @@ export interface PrepareFinishResult {
   flooredMinutes: number;
   startedAt: string;
   endedAt: string;
+}
+
+export function formatJstClockTime(iso?: string | null): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const todayStr = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Tokyo' }).format(new Date());
+  const targetStr = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Tokyo' }).format(d);
+  const hm = new Intl.DateTimeFormat('ja-JP', {
+    timeZone: 'Asia/Tokyo',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(d);
+  if (targetStr !== todayStr) {
+    const md = `${Number(targetStr.slice(5, 7))}/${Number(targetStr.slice(8, 10))}`;
+    return `${md} ${hm}`;
+  }
+  return hm;
 }
 
 export function formatTimerClock(totalSec: number): string {

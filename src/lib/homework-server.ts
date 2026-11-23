@@ -24,9 +24,12 @@ export type LiveTimerDoc = {
   accumulatedSec: number;
   lastHeartbeatAt: string;
   updatedAt: string;
+  autoPausedReason?: 'stale' | 'capped' | null;
+  offlineSince?: string | null;
 };
 
-export const LIVE_HEARTBEAT_TIMEOUT_SEC = 15 * 60;
+export const LIVE_HEARTBEAT_TIMEOUT_SEC = 2 * 60 * 60;
+export const LIVE_STALE_HIDE_AFTER_SEC = LIVE_HEARTBEAT_TIMEOUT_SEC + 30 * 60;
 export const LIVE_HEARTBEAT_GRACE_SEC = 60;
 export const LIVE_MAX_SESSION_SEC = 4 * 60 * 60;
 
@@ -35,6 +38,8 @@ export function computeLiveTimerState(doc: LiveTimerDoc, nowMs: number) {
 
   if (doc.status !== 'running' || !doc.resumedAt) {
     const clamped = Math.min(LIVE_MAX_SESSION_SEC, baseAccumulated);
+    const isStale = doc.autoPausedReason === 'stale';
+    const isCapped = clamped >= LIVE_MAX_SESSION_SEC || doc.autoPausedReason === 'capped';
     return {
       status: 'paused' as LiveTimerStatus,
       elapsedSec: clamped,
@@ -42,13 +47,16 @@ export function computeLiveTimerState(doc: LiveTimerDoc, nowMs: number) {
       startedAt: doc.startedAt,
       resumedAt: null as string | null,
       lastHeartbeatAt: doc.lastHeartbeatAt,
-      isStale: false,
-      isCapped: clamped >= LIVE_MAX_SESSION_SEC,
+      isStale,
+      isCapped,
+      autoPausedReason: (isStale ? 'stale' : isCapped ? 'capped' : null) as 'stale' | 'capped' | null,
+      offlineSince: isStale ? (doc.offlineSince || doc.lastHeartbeatAt || null) : null,
     };
   }
 
   const resumedMs = Date.parse(doc.resumedAt);
-  const heartbeatMs = Date.parse(doc.lastHeartbeatAt || doc.resumedAt || doc.startedAt);
+  const offlineSinceIso = doc.lastHeartbeatAt || doc.resumedAt || doc.startedAt;
+  const heartbeatMs = Date.parse(offlineSinceIso);
   if (Number.isNaN(resumedMs)) {
     const clamped = Math.min(LIVE_MAX_SESSION_SEC, baseAccumulated);
     return {
@@ -60,6 +68,8 @@ export function computeLiveTimerState(doc: LiveTimerDoc, nowMs: number) {
       lastHeartbeatAt: doc.lastHeartbeatAt,
       isStale: true,
       isCapped: clamped >= LIVE_MAX_SESSION_SEC,
+      autoPausedReason: 'stale' as 'stale' | 'capped' | null,
+      offlineSince: offlineSinceIso || null,
     };
   }
 
@@ -86,6 +96,8 @@ export function computeLiveTimerState(doc: LiveTimerDoc, nowMs: number) {
       lastHeartbeatAt: doc.lastHeartbeatAt,
       isStale,
       isCapped,
+      autoPausedReason: (isStale ? 'stale' : 'capped') as 'stale' | 'capped' | null,
+      offlineSince: isStale ? offlineSinceIso : null,
     };
   }
 
@@ -98,6 +110,8 @@ export function computeLiveTimerState(doc: LiveTimerDoc, nowMs: number) {
     lastHeartbeatAt: doc.lastHeartbeatAt,
     isStale: false,
     isCapped: false,
+    autoPausedReason: null as 'stale' | 'capped' | null,
+    offlineSince: null as string | null,
   };
 }
 

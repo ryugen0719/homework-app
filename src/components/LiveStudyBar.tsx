@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Check, Pause, Play, Trophy, X } from 'lucide-react';
 import {
+  formatJstClockTime,
   formatTimerClock,
   getLapProgress,
   LiveTimerState,
@@ -36,8 +37,11 @@ export default function LiveStudyBar({
   onOpenRace,
 }: LiveStudyBarProps) {
   const isRunning = timer.status === 'running';
+  const isStalePaused = !isRunning && (timer.isStale || timer.autoPausedReason === 'stale');
   const flooredMinutes = Math.floor(elapsedSec / 60);
   const { lapNumber, minuteProgressPct } = getLapProgress(elapsedSec);
+  const startedLabel = formatJstClockTime(timer.startedAt);
+  const offlineLabel = formatJstClockTime(timer.offlineSince || timer.lastHeartbeatAt);
 
   const prevMinRef = useRef(flooredMinutes);
   const [minutePulse, setMinutePulse] = useState(false);
@@ -101,14 +105,16 @@ export default function LiveStudyBar({
                   </span>
                 )}
               </div>
-              <p className="m-0 mt-0.5 text-[11px] font-semibold text-muted truncate">
+              <p className="m-0 mt-0.5 text-[11px] font-semibold text-muted truncate font-numbers tabular-nums">
                 {isRunning
                   ? flooredMinutes > 0
-                    ? `勉強中 · ${flooredMinutes}分記録できます`
-                    : '勉強中 · 1分以上で記録できます'
-                  : timer.isCapped
-                    ? '最大4時間に達しました（終了して記録してください）'
-                    : '一時停止中'}
+                    ? `勉強中 · ${flooredMinutes}分記録可${startedLabel ? `（${startedLabel}〜）` : ''}`
+                    : `勉強中 · 1分以上で記録可${startedLabel ? `（${startedLabel}〜）` : ''}`
+                  : isStalePaused
+                    ? '2時間以上画面非表示のため自動一時停止'
+                    : timer.isCapped
+                      ? '最大4時間に達しました（終了して記録してください）'
+                      : `一時停止中${startedLabel ? ` · 開始 ${startedLabel}` : ''}`}
               </p>
             </div>
           </div>
@@ -175,6 +181,18 @@ export default function LiveStudyBar({
             </button>
           </div>
         </div>
+
+        {/* 2時間以上画面非表示による自動停止時の詳細バー */}
+        {isStalePaused && (
+          <div className="border-t border-amber-500/20 bg-amber-500/10 px-3.5 py-1.5 flex flex-wrap items-center justify-between gap-x-3 gap-y-0.5 text-[11px] font-semibold text-amber-800 dark:text-amber-300 font-numbers tabular-nums">
+            <span>2時間以上画面がオフだったため自動で一時停止しました</span>
+            <span className="text-[10px] opacity-90">
+              {startedLabel ? `計測開始 ${startedLabel}` : ''}
+              {startedLabel && offlineLabel ? ' · ' : ''}
+              {offlineLabel ? `画面オフ ${offlineLabel}頃` : ''}
+            </span>
+          </div>
+        )}
       </div>
     </div>
   );

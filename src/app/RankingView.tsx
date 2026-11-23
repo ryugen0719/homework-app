@@ -22,6 +22,7 @@ import {
   Maximize2,
   Play,
   RefreshCw,
+  Target,
 } from 'lucide-react';
 import StudentAvatar from '../components/StudentAvatar';
 import CountUp from '../components/CountUp/CountUp';
@@ -31,6 +32,7 @@ import RaceFullscreenOverlay from '../components/RaceFullscreenOverlay';
 import { formatDuration } from '../lib/format-duration';
 import {
   computeInterpolatedSec,
+  formatJstClockTime,
   formatTimerClock,
   getLapProgress,
   LiveMemberComputed,
@@ -99,6 +101,8 @@ interface RankingData {
     id: string;
     name: string;
     inviteCode?: string;
+    weeklyGoalMinutes?: number;
+    weeklyGoalPoints?: number;
   };
   period?: RankingPeriod;
   rangeStart?: string;
@@ -222,17 +226,21 @@ function computeStandings(members: RankingMember[], metric: CompareMetric): Rank
 function computeTrackScale(
   maxVal: number,
   metric: CompareMetric,
-  period: RankingPeriod
+  period: RankingPeriod,
+  weeklyGoalMinutes = 120,
+  weeklyGoalPoints = 100
 ): { scaleValue: number; goalValue: number; isGoalExceeded: boolean } {
   const isWeekly = period === 'this-week' || period === 'last-week';
+  const baseMinutes = Math.max(30, Math.min(1800, Math.round(weeklyGoalMinutes || 120)));
+  const basePoints = Math.max(30, Math.min(2000, Math.round(weeklyGoalPoints || 100)));
   const goalValue =
     metric === 'minutes'
       ? isWeekly
-        ? 120
-        : 360
+        ? baseMinutes
+        : baseMinutes * 3
       : isWeekly
-        ? 100
-        : 300;
+        ? basePoints
+        : basePoints * 3;
 
   if (maxVal <= goalValue) {
     return { scaleValue: goalValue, goalValue, isGoalExceeded: false };
@@ -424,6 +432,11 @@ export default function RankingView({
   const [error, setError] = useState('');
   const [copiedInvite, setCopiedInvite] = useState(false);
   const [showRules, setShowRules] = useState(false);
+  const [showGoalEditor, setShowGoalEditor] = useState(false);
+  const [goalMinutesInput, setGoalMinutesInput] = useState<string>('120');
+  const [goalPointsInput, setGoalPointsInput] = useState<string>('100');
+  const [savingGoal, setSavingGoal] = useState(false);
+  const [goalError, setGoalError] = useState('');
   const [fullscreenOpen, setFullscreenOpen] = useState(false);
   const [rankDelta, setRankDelta] = useState<number>(0);
   const prevRankRef = useRef<{ key: string; rank: number } | null>(null);
@@ -681,7 +694,74 @@ export default function RankingView({
   const hasAnyScore = standings.some((m) => m.hasScore);
   const topVal = standings[0]?.metricValue ?? 0;
   const effectivePeriod: RankingPeriod = isDetailView ? 'last-week' : period;
-  const { scaleValue, goalValue, isGoalExceeded } = computeTrackScale(topVal, metric, effectivePeriod);
+  const savedWeeklyGoalMinutes = group.weeklyGoalMinutes ?? 120;
+  const savedWeeklyGoalPoints = group.weeklyGoalPoints ?? 100;
+  const { scaleValue, goalValue, isGoalExceeded } = computeTrackScale(
+    topVal,
+    metric,
+    effectivePeriod,
+    savedWeeklyGoalMinutes,
+    savedWeeklyGoalPoints
+  );
+
+  const openGoalEditor = () => {
+    setGoalError('');
+    setGoalMinutesInput(String(savedWeeklyGoalMinutes));
+    setGoalPointsInput(String(savedWeeklyGoalPoints));
+    setShowGoalEditor((v) => {
+      const next = !v;
+      if (next) setShowRules(false);
+      return next;
+    });
+  };
+
+  const handleSaveGoal = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const mins = Math.round(Number(goalMinutesInput));
+    const pts = Math.round(Number(goalPointsInput));
+    if (!Number.isFinite(mins) || mins < 30 || mins > 1800) {
+      setGoalError('週の目標時間は30分〜30時間（1800分）の間で指定してください');
+      return;
+    }
+    if (!Number.isFinite(pts) || pts < 30 || pts > 2000) {
+      setGoalError('週の目標ポイントは30〜2000ptの間で指定してください');
+      return;
+    }
+
+    setSavingGoal(true);
+    setGoalError('');
+    try {
+      const res = await fetch('/api/ranking', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-app-token': token,
+        },
+        body: JSON.stringify({
+          action: 'update-goal',
+          weeklyGoalMinutes: mins,
+          weeklyGoalPoints: pts,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        setGoalError(json.error || '目標の保存に失敗しました');
+        return;
+      }
+      // 同一トークンのキャッシュをクリアして即時再取得
+      for (const key of Array.from(rankingCache.keys())) {
+        if (key.startsWith(`${token}:`)) {
+          rankingCache.delete(key);
+        }
+      }
+      setShowGoalEditor(false);
+      await loadSnapshot({ showError: true });
+    } catch {
+      setGoalError('通信エラーが発生しました');
+    } finally {
+      setSavingGoal(false);
+    }
+  };
   const goalPct = scaleValue > 0 ? Math.min(100, Math.round((goalValue / scaleValue) * 100)) : 100;
   const showMidpointLabel = !isGoalExceeded || Math.abs(goalPct - 50) >= 20;
   const leader = standings[0] ?? null;
@@ -847,7 +927,13 @@ export default function RankingView({
 
             <button
               type="button"
-              onClick={() => setShowRules((v) => !v)}
+              onClick={() => {
+                setShowRules((v) => {
+                  const next = !v;
+                  if (next) setShowGoalEditor(false);
+                  return next;
+                });
+              }}
               className={`grid size-9 place-items-center rounded-xl transition-all cursor-pointer active:scale-95 focus-visible:outline-2 focus-visible:outline-primary ${
                 showRules
                   ? 'bg-primary-soft text-primary-ink'
@@ -935,6 +1021,21 @@ export default function RankingView({
               </button>
             ))}
           </div>
+
+          <button
+            type="button"
+            onClick={openGoalEditor}
+            aria-expanded={showGoalEditor}
+            title="クラスの週間目標を変更"
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold font-numbers transition-all cursor-pointer active:scale-95 focus-visible:outline-2 focus-visible:outline-primary ${
+              showGoalEditor
+                ? 'border-primary/40 bg-primary-soft text-primary-ink'
+                : 'border-line/80 bg-card text-muted hover:border-line-strong hover:text-ink'
+            }`}
+          >
+            <Target size={13} className="text-primary shrink-0" aria-hidden="true" />
+            <span>目標 {formatMetric(goalValue)}</span>
+          </button>
         </div>
 
         {/* 期間指定コントロール（custom 選択時のみリッチなカレンダーピッカーを表示） */}
@@ -954,6 +1055,129 @@ export default function RankingView({
               { label: '今月1日〜今日', start: `${todayStr.slice(0, 7)}-01`, end: todayStr },
             ]}
           />
+        )}
+
+        {/* 週の目標設定パネル */}
+        {showGoalEditor && (
+          <form
+            onSubmit={handleSaveGoal}
+            className="rounded-2xl border border-line bg-card p-4 shadow-card space-y-3.5"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-1.5 text-xs font-extrabold text-ink">
+                <Target size={14} className="text-primary" />
+                <span>クラスの週間目標を設定</span>
+              </div>
+              <span className="text-[11px] text-muted">
+                月間などは自動で3倍スケールになります
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+              {/* 週の目標時間 */}
+              <div className="space-y-1.5">
+                <label htmlFor="race-goal-minutes" className="block text-[11px] font-bold text-muted">
+                  勉強時間の目標（週あたり）
+                </label>
+                <div className="flex flex-wrap gap-1.5">
+                  {[
+                    { label: '1時間', val: 60 },
+                    { label: '2時間', val: 120 },
+                    { label: '3時間', val: 180 },
+                    { label: '5時間', val: 300 },
+                    { label: '10時間', val: 600 },
+                  ].map((p) => (
+                    <button
+                      key={p.val}
+                      type="button"
+                      onClick={() => setGoalMinutesInput(String(p.val))}
+                      className={`px-2.5 py-1 rounded-full text-[11px] font-bold font-numbers transition-all cursor-pointer ${
+                        Number(goalMinutesInput) === p.val
+                          ? 'bg-primary text-white'
+                          : 'bg-card-subtle text-muted hover:text-ink'
+                      }`}
+                    >
+                      {p.label}
+                    </button>
+                  ))}
+                </div>
+                <div className="flex items-center gap-2 pt-0.5">
+                  <input
+                    id="race-goal-minutes"
+                    type="number"
+                    min={30}
+                    max={1800}
+                    step={10}
+                    value={goalMinutesInput}
+                    onChange={(e) => setGoalMinutesInput(e.target.value)}
+                    className="w-24 px-2.5 py-1.5 rounded-xl border border-line bg-card text-sm font-bold font-numbers text-ink focus:outline-none focus:border-primary"
+                  />
+                  <span className="text-xs font-semibold text-muted font-numbers">
+                    分（{Number(goalMinutesInput) >= 30 ? formatDuration(Math.round(Number(goalMinutesInput))) : '—'}）
+                  </span>
+                </div>
+              </div>
+
+              {/* 週の目標ポイント */}
+              <div className="space-y-1.5">
+                <label htmlFor="race-goal-points" className="block text-[11px] font-bold text-muted">
+                  ポイントの目標（週あたり）
+                </label>
+                <div className="flex flex-wrap gap-1.5">
+                  {[100, 150, 200, 300, 500].map((val) => (
+                    <button
+                      key={val}
+                      type="button"
+                      onClick={() => setGoalPointsInput(String(val))}
+                      className={`px-2.5 py-1 rounded-full text-[11px] font-bold font-numbers transition-all cursor-pointer ${
+                        Number(goalPointsInput) === val
+                          ? 'bg-primary text-white'
+                          : 'bg-card-subtle text-muted hover:text-ink'
+                      }`}
+                    >
+                      {val}pt
+                    </button>
+                  ))}
+                </div>
+                <div className="flex items-center gap-2 pt-0.5">
+                  <input
+                    id="race-goal-points"
+                    type="number"
+                    min={30}
+                    max={2000}
+                    step={10}
+                    value={goalPointsInput}
+                    onChange={(e) => setGoalPointsInput(e.target.value)}
+                    className="w-24 px-2.5 py-1.5 rounded-xl border border-line bg-card text-sm font-bold font-numbers text-ink focus:outline-none focus:border-primary"
+                  />
+                  <span className="text-xs font-semibold text-muted font-numbers">pt</span>
+                </div>
+              </div>
+            </div>
+
+            {goalError && (
+              <p className="m-0 text-xs font-semibold text-danger">{goalError}</p>
+            )}
+
+            <div className="flex items-center justify-end gap-2 pt-1">
+              <button
+                type="button"
+                disabled={savingGoal}
+                onClick={() => setShowGoalEditor(false)}
+                className="px-3.5 py-1.5 rounded-xl text-xs font-bold text-muted hover:text-ink hover:bg-card-subtle transition-colors cursor-pointer"
+              >
+                キャンセル
+              </button>
+              <button
+                type="submit"
+                disabled={savingGoal}
+                className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-xl bg-primary !text-white text-xs font-bold hover:bg-primary-hover active:scale-95 transition-all shadow-subtle cursor-pointer disabled:opacity-50"
+              >
+                <Check size={13} strokeWidth={2.6} className="!text-white" />
+                <span className="!text-white">{savingGoal ? '保存中…' : '目標を保存'}</span>
+              </button>
+            </div>
+          </form>
         )}
 
         {/* 開閉式ルールガイド */}
@@ -1127,6 +1351,9 @@ export default function RankingView({
             (() => {
               const lap = getLapProgress(myElapsedSec);
               const running = myTimer.status === 'running';
+              const isStalePaused = !running && (myTimer.isStale || myTimer.autoPausedReason === 'stale');
+              const startedLabel = formatJstClockTime(myTimer.startedAt);
+              const offlineLabel = formatJstClockTime(myTimer.offlineSince || myTimer.lastHeartbeatAt);
               return (
                 <div className="flex items-center gap-3 min-w-0">
                   <span className="relative flex size-2.5 shrink-0" aria-hidden="true">
@@ -1138,7 +1365,7 @@ export default function RankingView({
                     />
                   </span>
                   <div className="min-w-0">
-                    <p className="m-0 flex items-baseline gap-2 font-numbers tabular-nums">
+                    <p className="m-0 flex flex-wrap items-baseline gap-x-2 gap-y-0.5 font-numbers tabular-nums">
                       <span className="text-xl font-extrabold tracking-tight text-ink leading-none">
                         {formatTimerClock(myElapsedSec)}
                       </span>
@@ -1147,11 +1374,22 @@ export default function RankingView({
                           running ? 'text-reward-ink' : 'text-amber-700 dark:text-amber-300'
                         }`}
                       >
-                        {running ? '勉強中' : '一時停止中'}
+                        {running ? '勉強中' : isStalePaused ? '自動一時停止（2時間以上非表示）' : '一時停止中'}
                       </span>
                     </p>
-                    <p className="m-0 mt-0.5 text-[11px] font-semibold text-muted font-numbers tabular-nums truncate">
-                      LAP {lap.lapNumber} · 次の周回まであと {formatTimerClock(lap.remainingSecInLap)}
+                    <p className="m-0 mt-0.5 text-[11px] font-semibold text-muted font-numbers tabular-nums">
+                      {isStalePaused ? (
+                        <span>
+                          2時間以上画面がオフだったため停止しました
+                          {startedLabel ? ` · 計測開始 ${startedLabel}` : ''}
+                          {offlineLabel ? ` · 画面オフ ${offlineLabel}頃` : ''}
+                        </span>
+                      ) : (
+                        <span>
+                          LAP {lap.lapNumber} · 次の周回まであと {formatTimerClock(lap.remainingSecInLap)}
+                          {startedLabel ? ` · 開始 ${startedLabel}` : ''}
+                        </span>
+                      )}
                     </p>
                   </div>
                 </div>

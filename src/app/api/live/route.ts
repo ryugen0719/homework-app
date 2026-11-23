@@ -3,6 +3,7 @@ import {
   authenticate,
   computeLiveTimerState,
   database,
+  LIVE_STALE_HIDE_AFTER_SEC,
   LiveTimerDoc,
 } from '../../../lib/homework-server';
 
@@ -124,7 +125,7 @@ export async function GET(request: NextRequest) {
           // 放置（離席）で自動停止した他メンバーは、さらに30分以上経過していれば表示から外す
           if (state.isStale) {
             const hbMs = Date.parse(state.lastHeartbeatAt || state.startedAt);
-            if (!Number.isNaN(hbMs) && nowMs - hbMs > 45 * 60 * 1000) {
+            if (!Number.isNaN(hbMs) && nowMs - hbMs > LIVE_STALE_HIDE_AFTER_SEC * 1000) {
               return null;
             }
           }
@@ -221,6 +222,8 @@ export async function POST(request: NextRequest) {
           accumulatedSec: 0,
           lastHeartbeatAt: nowIso,
           updatedAt: nowIso,
+          autoPausedReason: null,
+          offlineSince: null,
         };
         tx.set(timerRef, doc);
         return computeLiveTimerState(doc, nowMs);
@@ -240,6 +243,8 @@ export async function POST(request: NextRequest) {
           accumulatedSec: current.elapsedSec,
           lastHeartbeatAt: nowIso,
           updatedAt: nowIso,
+          autoPausedReason: null,
+          offlineSince: null,
         };
         tx.set(timerRef, doc);
         return computeLiveTimerState(doc, nowMs);
@@ -283,6 +288,8 @@ export async function POST(request: NextRequest) {
           accumulatedSec: current.elapsedSec,
           lastHeartbeatAt: nowIso,
           updatedAt: nowIso,
+          autoPausedReason: null,
+          offlineSince: null,
         };
         tx.set(timerRef, doc);
         return computeLiveTimerState(doc, nowMs);
@@ -309,8 +316,10 @@ export async function POST(request: NextRequest) {
             startedAt: current.startedAt,
             resumedAt: null,
             accumulatedSec: current.elapsedSec,
-            lastHeartbeatAt: nowIso,
+            lastHeartbeatAt: current.isStale ? (current.offlineSince || raw.lastHeartbeatAt) : nowIso,
             updatedAt: nowIso,
+            autoPausedReason: current.isStale ? 'stale' : 'capped',
+            offlineSince: current.isStale ? (current.offlineSince || raw.lastHeartbeatAt) : null,
           };
           tx.set(timerRef, doc);
           return computeLiveTimerState(doc, nowMs);
