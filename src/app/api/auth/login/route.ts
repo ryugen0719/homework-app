@@ -32,24 +32,21 @@ export async function POST(request: Request) {
     const name = typeof body.name === 'string' ? body.name.trim() : '';
     const password = typeof body.password === 'string' ? body.password.trim() : '';
 
-    if (!name || !password) {
-      return respond('お名前とパスワードを入力してください', 400);
-    }
-
-    // 1. 先生ログイン
+    // 1. 先生ログイン（パスワードのみで認証）
     if (role === 'teacher') {
+      if (!password) {
+        return respond('先生パスワードを入力してください', 400);
+      }
       const teacher = getTeacherCredentials();
       const teacherToken = process.env.TEACHER_TOKEN;
       if (!teacherToken) {
         return respond('先生のアカウント設定がありません', 503);
       }
 
-      // 名前が「先生」または設定された管理名、あるいは名前不問（先生タブでの入力）
-      const nameMatch = name === teacher.name || name === '先生' || name.toLowerCase() === 'teacher';
       const passwordMatch = await verifyTeacherPassword(password);
 
-      if (!nameMatch || !passwordMatch) {
-        return respond('先生の名前、またはパスワードが正しくありません', 401);
+      if (!passwordMatch) {
+        return respond('パスワードが正しくありません', 401);
       }
 
       return NextResponse.json({
@@ -58,6 +55,10 @@ export async function POST(request: Request) {
         token: teacherToken,
         name: teacher.name,
       }, { headers: { 'Cache-Control': 'no-store' } });
+    }
+
+    if (!name || !password) {
+      return respond('お名前とパスワードを入力してください', 400);
     }
 
     // 2. 生徒ログイン

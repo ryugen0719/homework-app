@@ -52,7 +52,6 @@ export default function LoginView({ onLoginSuccess, onGateRequired }: LoginViewP
   // フォームステート
   const [selectedStudentName, setSelectedStudentName] = useState('');
   const [studentPassword, setStudentPassword] = useState('');
-  const [teacherName, setTeacherName] = useState('先生');
   const [teacherPassword, setTeacherPassword] = useState('');
 
   const [showPassword, setShowPassword] = useState(false);
@@ -150,8 +149,8 @@ export default function LoginView({ onLoginSuccess, onGateRequired }: LoginViewP
 
   const handleTeacherLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!teacherName.trim() || !teacherPassword.trim()) {
-      setErrorMessage('先生のお名前とパスワードを入力してください');
+    if (!teacherPassword.trim()) {
+      setErrorMessage('先生パスワードを入力してください');
       return;
     }
 
@@ -164,7 +163,6 @@ export default function LoginView({ onLoginSuccess, onGateRequired }: LoginViewP
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           role: 'teacher',
-          name: teacherName.trim(),
           password: teacherPassword.trim(),
         }),
       });
@@ -281,26 +279,26 @@ export default function LoginView({ onLoginSuccess, onGateRequired }: LoginViewP
                     })}
                   </div>
                 </div>
-              ) : null}
-
-              {/* お名前入力（手動入力も可能） */}
-              <div>
-                <label className="block text-xs font-bold text-muted mb-1.5" htmlFor="student-name">
-                  お名前（ニックネーム可）
-                </label>
-                <div className="relative">
-                  <User size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted" />
-                  <input
-                    id="student-name"
-                    type="text"
-                    placeholder="例: たろう"
-                    value={selectedStudentName}
-                    onChange={(e) => setSelectedStudentName(e.target.value)}
-                    className="w-full pl-10 pr-4 py-2.5 text-sm font-semibold rounded-2xl border border-line bg-card text-ink focus:outline-none focus:border-primary shadow-subtle"
-                    required
-                  />
+              ) : (
+                /* 生徒一覧が取得できなかった場合のみ手動入力欄を表示 */
+                <div>
+                  <label className="block text-xs font-bold text-muted mb-1.5" htmlFor="student-name">
+                    お名前
+                  </label>
+                  <div className="relative">
+                    <User size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted" />
+                    <input
+                      id="student-name"
+                      type="text"
+                      placeholder="例: たろう"
+                      value={selectedStudentName}
+                      onChange={(e) => setSelectedStudentName(e.target.value)}
+                      className="w-full pl-10 pr-4 py-2.5 text-sm font-semibold rounded-2xl border border-line bg-card text-ink focus:outline-none focus:border-primary shadow-subtle"
+                      required
+                    />
+                  </div>
                 </div>
-              </div>
+              )}
 
               {/* パスワード（4桁PINスロット / 通常入力切替） */}
               <div>
@@ -403,26 +401,8 @@ export default function LoginView({ onLoginSuccess, onGateRequired }: LoginViewP
               </button>
             </form>
           ) : (
-            /* 先生ログインフォーム */
+            /* 先生ログインフォーム（パスワードのみ） */
             <form onSubmit={handleTeacherLogin} className="space-y-4">
-              <div>
-                <label className="block text-xs font-bold text-muted mb-1.5" htmlFor="teacher-name">
-                  先生のお名前
-                </label>
-                <div className="relative">
-                  <GraduationCap size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted" />
-                  <input
-                    id="teacher-name"
-                    type="text"
-                    value={teacherName}
-                    onChange={(e) => setTeacherName(e.target.value)}
-                    placeholder="先生"
-                    className="w-full pl-10 pr-4 py-2.5 text-sm font-semibold rounded-2xl border border-line bg-card text-ink focus:outline-none focus:border-primary shadow-subtle"
-                    required
-                  />
-                </div>
-              </div>
-
               <div>
                 <label className="block text-xs font-bold text-muted mb-1.5" htmlFor="teacher-pw">
                   先生パスワード
@@ -448,13 +428,13 @@ export default function LoginView({ onLoginSuccess, onGateRequired }: LoginViewP
                   </button>
                 </div>
                 <p className="text-[11px] text-muted mt-1.5">
-                  ※初期パスワード、または設定された先生パスワードを入力してください。
+                  ※設定された先生パスワードを入力してください。
                 </p>
               </div>
 
               <button
                 type="submit"
-                disabled={submitting || !teacherName.trim() || !teacherPassword.trim()}
+                disabled={submitting || !teacherPassword.trim()}
                 className="w-full py-3 px-4 rounded-2xl bg-primary text-white font-bold text-sm shadow-subtle hover:bg-primary-hover active:scale-95 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 mt-2"
               >
                 {submitting ? (
