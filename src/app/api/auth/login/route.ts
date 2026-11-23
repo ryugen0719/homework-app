@@ -4,6 +4,7 @@ import {
   ensureDefaultStudent,
   getTeacherCredentials,
   verifyPassword,
+  verifyTeacherPassword,
 } from '../../../../lib/homework-server';
 
 function respond(message: string, status = 400) {
@@ -36,10 +37,7 @@ export async function POST(request: Request) {
 
       // 名前が「先生」または設定された管理名、あるいは名前不問（先生タブでの入力）
       const nameMatch = name === teacher.name || name === '先生' || name.toLowerCase() === 'teacher';
-      const passwordMatch =
-        password === teacher.password ||
-        (process.env.TEACHER_TOKEN && password === process.env.TEACHER_TOKEN.slice(0, 8)) ||
-        password === 'teacher1234';
+      const passwordMatch = await verifyTeacherPassword(password);
 
       if (!nameMatch || !passwordMatch) {
         return respond('先生の名前、またはパスワードが正しくありません', 401);

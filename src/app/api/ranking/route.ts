@@ -9,6 +9,7 @@ import {
   MAX_MEMBERS_PER_GROUP,
   offsetDateJst,
   sessionsFromDay,
+  validDate,
   weekStartFor,
 } from '../../../lib/homework-server';
 
@@ -27,6 +28,76 @@ function respondError(message: string, status = 400) {
 
 const todayJst = () => new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Tokyo' }).format(new Date());
 
+type RankingPeriod =
+  | 'this-week'
+  | 'last-week'
+  | 'this-month'
+  | 'last-month'
+  | 'last-30'
+  | 'all'
+  | 'custom';
+
+function calculateRangePoints(
+  allHistory: Record<string, ReturnType<typeof sessionsFromDay>>,
+  rangeStart: string,
+  rangeEnd: string,
+) {
+  const sortedDates = Object.keys(allHistory)
+    .filter((d) => validDate(d))
+    .sort();
+
+  const dailyBonusMap: Record<string, number> = {};
+  const dailyPhotoBonusMap: Record<string, number> = {};
+  const dailyMinutesMap: Record<string, number> = {};
+
+  let currentStreak = 0;
+  let prevDate = '';
+
+  for (const date of sortedDates) {
+    const sessions = allHistory[date] || [];
+    const dayMinutes = sessions.reduce((sum, s) => sum + (s.minutes || 0), 0);
+    dailyMinutesMap[date] = dayMinutes;
+
+    if (sessions.some((s) => Boolean(s.evidencePath))) {
+      dailyPhotoBonusMap[date] = 5;
+    }
+
+    if (dayMinutes >= 10) {
+      if (prevDate && offsetDateJst(prevDate, 1) === date) {
+        currentStreak += 1;
+      } else {
+        currentStreak = 1;
+      }
+      prevDate = date;
+      dailyBonusMap[date] = Math.min(5, currentStreak) * 5;
+    }
+  }
+
+  let totalMinutes = 0;
+  let totalStreakBonus = 0;
+  let totalPhotoBonus = 0;
+  let activeDays = 0;
+
+  for (const date of sortedDates) {
+    if (date < rangeStart || date > rangeEnd) continue;
+    const mins = dailyMinutesMap[date] || 0;
+    const hasSessions = (allHistory[date]?.length || 0) > 0;
+    if (hasSessions) activeDays += 1;
+    totalMinutes += mins;
+    totalStreakBonus += dailyBonusMap[date] || 0;
+    totalPhotoBonus += dailyPhotoBonusMap[date] || 0;
+  }
+
+  return {
+    weekMinutes: totalMinutes,
+    weekStreakBonus: totalStreakBonus,
+    weekPhotoBonus: totalPhotoBonus,
+    weekPoints: totalMinutes + totalStreakBonus + totalPhotoBonus,
+    currentStreak,
+    activeDays,
+  };
+}
+
 /**
  * 先生または生徒が所属するグループ、およびそのグループの週次ランキングを取得
  * 認可境界: 学習内容、提出写真、先生コメントは絶対に返さない。
@@ -36,7 +107,67 @@ export async function GET(request: NextRequest) {
   if (!auth) return respondError('認証が必要です', 401);
 
   const db = database();
-  const targetWeekStart = request.nextUrl.searchParams.get('weekStart') || weekStartFor(todayJst());
+  const today = todayJst();
+  const currentWeekStart = weekStartFor(today);
+  const requestedWeek = request.nextUrl.searchParams.get('weekStart');
+  const requestedPeriod = request.nextUrl.searchParams.get('period') as RankingPeriod | null;
+  const requestedStart = request.nextUrl.searchParams.get('startDate');
+  const requestedEnd = request.nextUrl.searchParams.get('endDate');
+
+  let period: RankingPeriod = 'this-week';
+  let targetWeekStart = currentWeekStart;
+  let rangeStart = currentWeekStart;
+  let rangeEnd = offsetDateJst(currentWeekStart, 6);
+
+  if (requestedWeek && validDate(requestedWeek)) {
+    targetWeekStart = weekStartFor(requestedWeek);
+    if (targetWeekStart > currentWeekStart) targetWeekStart = currentWeekStart;
+    period = targetWeekStart === currentWeekStart ? 'this-week' : 'last-week';
+    rangeStart = targetWeekStart;
+    rangeEnd = offsetDateJst(targetWeekStart, 6);
+  } else if (requestedPeriod === 'last-week') {
+    period = 'last-week';
+    targetWeekStart = offsetDateJst(currentWeekStart, -7);
+    rangeStart = targetWeekStart;
+    rangeEnd = offsetDateJst(targetWeekStart, 6);
+  } else if (requestedPeriod === 'this-month') {
+    period = 'this-month';
+    const ym = today.slice(0, 7);
+    rangeStart = `${ym}-01`;
+    rangeEnd = today;
+  } else if (requestedPeriod === 'last-month') {
+    period = 'last-month';
+    const [y, m] = today.slice(0, 7).split('-').map(Number);
+    const prevFirst = new Date(y, m - 2, 1);
+    const py = prevFirst.getFullYear();
+    const pm = prevFirst.getMonth() + 1;
+    const lastDay = new Date(py, pm, 0).getDate();
+    const pym = `${py}-${String(pm).padStart(2, '0')}`;
+    rangeStart = `${pym}-01`;
+    rangeEnd = `${pym}-${String(lastDay).padStart(2, '0')}`;
+  } else if (requestedPeriod === 'last-30') {
+    period = 'last-30';
+    rangeStart = offsetDateJst(today, -29);
+    rangeEnd = today;
+  } else if (requestedPeriod === 'all') {
+    period = 'all';
+    rangeStart = '2020-01-01';
+    rangeEnd = today;
+  } else if (
+    requestedPeriod === 'custom' &&
+    requestedStart &&
+    requestedEnd &&
+    validDate(requestedStart) &&
+    validDate(requestedEnd)
+  ) {
+    period = 'custom';
+    rangeStart = requestedStart <= requestedEnd ? requestedStart : requestedEnd;
+    rangeEnd = requestedStart <= requestedEnd ? requestedEnd : requestedStart;
+    if (rangeEnd > today) rangeEnd = today;
+  }
+
+  const isWeeklyMode = !requestedPeriod || requestedPeriod === 'this-week' || requestedPeriod === 'last-week' || Boolean(requestedWeek);
+  const isCurrentWeek = isWeeklyMode && targetWeekStart === currentWeekStart;
 
   try {
     // 先生の場合は自身のID、生徒の場合は担当先生または所属グループを探す
@@ -126,20 +257,26 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // 各メンバーの週次ポイント集計（Promise.allで完全並列取得 + 直近90日分に絞って高速化）
-    // ※ プライバシー境界: 学習内容や写真、コメントは一切含めず、週の分数と継続ボーナスのみを集計する
-    const historyStartDate = offsetDateJst(targetWeekStart, -90);
-    const historyEndDate = offsetDateJst(targetWeekStart, 6);
+    // 各メンバーの集計（Promise.allで完全並列取得）
+    // 履歴一覧（直近8週）も追加クエリなしで同時計算できるよう開始日を十分に確保
+    const earliestHistoryWeek = offsetDateJst(currentWeekStart, -7 * 8);
+    const streakBufferStart = period === 'all' ? '2020-01-01' : offsetDateJst(rangeStart, -14);
+    const historyStartDate = streakBufferStart < earliestHistoryWeek ? streakBufferStart : earliestHistoryWeek;
+    const currentWeekEnd = offsetDateJst(currentWeekStart, 6);
+    const historyEndDate = rangeEnd > currentWeekEnd ? rangeEnd : currentWeekEnd;
 
     const activeMembers = members.filter((m) => m.status !== 'suspended');
 
-    const memberResults = await Promise.all(
+    const memberHistories = await Promise.all(
       activeMembers.map(async (member) => {
         const studentRef = db.collection('students').doc(member.studentId);
-        const daysQuery = studentRef
-          .collection('days')
-          .where(FieldPath.documentId(), '>=', historyStartDate)
-          .where(FieldPath.documentId(), '<=', historyEndDate);
+        const daysQuery =
+          period === 'all'
+            ? studentRef.collection('days')
+            : studentRef
+                .collection('days')
+                .where(FieldPath.documentId(), '>=', historyStartDate)
+                .where(FieldPath.documentId(), '<=', historyEndDate);
 
         // 生徒情報と学習日ドキュメントを同時並列取得
         const [sDoc, daysSnapshot] = await Promise.all([
@@ -162,58 +299,131 @@ export async function GET(request: NextRequest) {
 
         // default-student かつ新コレクションが空の場合のみ旧コレクションへフォールバック
         if (member.studentId === 'default-student' && Object.keys(history).length === 0) {
-          const oldDaysSnapshot = await db
-            .collection('days')
-            .where(FieldPath.documentId(), '>=', historyStartDate)
-            .where(FieldPath.documentId(), '<=', historyEndDate)
-            .get();
+          const oldDaysQuery =
+            period === 'all'
+              ? db.collection('days')
+              : db
+                  .collection('days')
+                  .where(FieldPath.documentId(), '>=', historyStartDate)
+                  .where(FieldPath.documentId(), '<=', historyEndDate);
+          const oldDaysSnapshot = await oldDaysQuery.get();
           for (const dayDoc of oldDaysSnapshot.docs) {
             history[dayDoc.id] = sessionsFromDay(dayDoc.data() || {});
           }
         }
 
-        const pointsSummary = calculateWeeklyPoints(history, targetWeekStart);
-
         return {
           studentId: member.studentId,
-          displayName: sData.displayName || member.displayName,
-          color: sData.color || member.color,
-          icon: sData.icon || member.icon,
-          avatarUrl: sData.avatarUrl || '',
+          displayName: (sData.displayName as string) || member.displayName,
+          color: (sData.color as string) || member.color,
+          icon: (sData.icon as string) || member.icon,
+          avatarUrl: (sData.avatarUrl as string) || '',
+          isMe: auth.role === 'student' && member.studentId === auth.studentId,
+          isOptedOut,
+          history,
+        };
+      })
+    );
+
+    const validMembers = memberHistories.filter((item): item is NonNullable<typeof item> => item !== null);
+
+    const assignRanks = <T extends { weekPoints: number }>(list: T[]) => {
+      const sorted = [...list].sort((a, b) => b.weekPoints - a.weekPoints);
+      let currentRank = 1;
+      let prevPoints = -1;
+      return sorted.map((m, index) => {
+        if (index === 0) {
+          currentRank = 1;
+          prevPoints = m.weekPoints;
+        } else if (m.weekPoints < prevPoints) {
+          currentRank = index + 1;
+          prevPoints = m.weekPoints;
+        }
+        return { ...m, rank: currentRank };
+      });
+    };
+
+    const computeWeekRanking = (weekStart: string) => {
+      const list = validMembers.map((m) => {
+        const pointsSummary = calculateWeeklyPoints(m.history, weekStart);
+        return {
+          studentId: m.studentId,
+          displayName: m.displayName,
+          color: m.color,
+          icon: m.icon,
+          avatarUrl: m.avatarUrl,
           weekMinutes: pointsSummary.weekMinutes,
           weekStreakBonus: pointsSummary.weekStreakBonus,
           weekPhotoBonus: pointsSummary.weekPhotoBonus,
           weekPoints: pointsSummary.weekPoints,
           currentStreak: pointsSummary.currentStreak,
-          isMe: auth.role === 'student' && member.studentId === auth.studentId,
-          isOptedOut,
+          isMe: m.isMe,
+          isOptedOut: m.isOptedOut,
         };
-      })
-    );
+      });
+      return assignRanks(list);
+    };
 
-    const rankingList = memberResults.filter((item): item is NonNullable<typeof item> => item !== null);
+    const rankedMembers = isWeeklyMode
+      ? computeWeekRanking(targetWeekStart)
+      : assignRanks(
+          validMembers.map((m) => {
+            const summary = calculateRangePoints(m.history, rangeStart, rangeEnd);
+            return {
+              studentId: m.studentId,
+              displayName: m.displayName,
+              color: m.color,
+              icon: m.icon,
+              avatarUrl: m.avatarUrl,
+              weekMinutes: summary.weekMinutes,
+              weekStreakBonus: summary.weekStreakBonus,
+              weekPhotoBonus: summary.weekPhotoBonus,
+              weekPoints: summary.weekPoints,
+              currentStreak: summary.currentStreak,
+              isMe: m.isMe,
+              isOptedOut: m.isOptedOut,
+            };
+          })
+        );
 
-    // ポイント順にソート (降順)
-    rankingList.sort((a, b) => b.weekPoints - a.weekPoints);
+    const topPoints = rankedMembers.length > 0 ? Math.max(...rankedMembers.map((m) => m.weekPoints), 0) : 0;
+    const maxPoints = topPoints <= 100 ? 100 : Math.ceil(topPoints / 50) * 50;
 
-    // 順位付与（同点は同順位）
-    let currentRank = 1;
-    let prevPoints = -1;
-    const rankedMembers = rankingList.map((m, index) => {
-      if (index === 0) {
-        currentRank = 1;
-        prevPoints = m.weekPoints;
-      } else if (m.weekPoints < prevPoints) {
-        currentRank = index + 1;
-        prevPoints = m.weekPoints;
-      }
+    // 過去8週分のレース履歴サマリー
+    const recentWeeks = Array.from({ length: 8 }, (_, idx) => {
+      const wStart = offsetDateJst(currentWeekStart, -7 * (idx + 1));
+      const wEnd = offsetDateJst(wStart, 6);
+      const weekRanking = computeWeekRanking(wStart);
+      const totalPoints = weekRanking.reduce((sum, m) => sum + m.weekPoints, 0);
+      const top = weekRanking[0] && weekRanking[0].weekPoints > 0 ? weekRanking[0] : null;
+      const tiedWinners = top
+        ? weekRanking.filter((m) => m.rank === 1 && m.weekPoints === top.weekPoints).length > 1
+        : false;
+      const me = weekRanking.find((m) => m.isMe);
+      const myTied =
+        me && me.weekPoints > 0
+          ? weekRanking.filter((m) => m.rank === me.rank).length > 1
+          : false;
       return {
-        ...m,
-        rank: currentRank,
+        weekStart: wStart,
+        weekEnd: wEnd,
+        totalPoints,
+        participantCount: weekRanking.length,
+        winner: top
+          ? {
+              studentId: top.studentId,
+              displayName: top.displayName,
+              color: top.color,
+              avatarUrl: top.avatarUrl,
+              weekPoints: top.weekPoints,
+              isTied: tiedWinners,
+            }
+          : null,
+        myRank: me && me.weekPoints > 0 ? me.rank : undefined,
+        myPoints: me ? me.weekPoints : undefined,
+        myTied,
       };
     });
-
-    const maxPoints = rankedMembers.length > 0 ? Math.max(...rankedMembers.map((m) => m.weekPoints), 10) : 100;
 
     return json({
       group: {
@@ -221,9 +431,16 @@ export async function GET(request: NextRequest) {
         name: groupData.name || 'クラスレース',
         inviteCode: auth.role === 'teacher' ? groupData.inviteCode : undefined,
       },
+      period,
+      rangeStart,
+      rangeEnd,
+      isWeeklyMode,
       targetWeekStart,
+      currentWeekStart,
+      isCurrentWeek,
       maxPoints,
       members: rankedMembers,
+      recentWeeks,
       currentUser: {
         role: auth.role,
         studentId: currentStudentId,

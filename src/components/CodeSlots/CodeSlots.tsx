@@ -69,7 +69,10 @@ interface SlotProps {
 }
 
 const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
-const digitsOf = (raw: string | undefined) => String(raw ?? '').replace(/\D/g, '');
+const digitsOf = (raw: string | undefined) =>
+  String(raw ?? '')
+    .replace(/[０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0))
+    .replace(/\D/g, '');
 const toSlots = (raw: string | undefined, n: number) => {
   const d = digitsOf(raw).slice(0, n);
   return Array.from({ length: n }, (_, i) => d[i] ?? '');
@@ -124,11 +127,18 @@ const CodeSlots: React.FC<CodeSlotsProps> = ({
   const statusRef = useRef(status);
   const emitted = useRef(digitsOf(value ?? defaultValue).slice(0, length));
   const slotsRef = useRef(slots);
+  const activeRef = useRef(active);
+  const composingRef = useRef(false);
+  const lastBackspaceAtRef = useRef(0);
   const live = useRef<Live>({ settle, bounce, cascade, reduce });
 
   useEffect(() => {
     slotsRef.current = slots;
   }, [slots]);
+
+  useEffect(() => {
+    activeRef.current = active;
+  }, [active]);
 
   useEffect(() => {
     live.current = { settle, bounce, cascade, reduce };
@@ -170,6 +180,7 @@ const CodeSlots: React.FC<CodeSlotsProps> = ({
   const moveActive = useCallback(
     (next: number, crossed: number[]) => {
       crossed.forEach(j => glide.current.add(j));
+      activeRef.current = next;
       activeMv.jump(next);
       setActive(next);
     },
@@ -178,6 +189,7 @@ const CodeSlots: React.FC<CodeSlotsProps> = ({
   const jumpActive = useCallback(
     (next: number) => {
       glide.current.clear();
+      activeRef.current = next;
       activeMv.jump(next);
       setActive(next);
     },
@@ -251,25 +263,32 @@ const CodeSlots: React.FC<CodeSlotsProps> = ({
   };
 
   const isBusy = () => disabled || draining.current || status === 'success';
+  const handleBackspace = () => {
+    const idx = activeRef.current;
+    if (slotsRef.current[idx]) clearSlot(idx);
+    else if (idx > 0) clearSlot(idx - 1, true);
+  };
   const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (isBusy() || e.metaKey || e.ctrlKey || e.altKey) return;
+    if (isBusy() || e.metaKey || e.ctrlKey || e.altKey || composingRef.current) return;
     const k = e.key;
-    if (/^[0-9]$/.test(k)) {
+    // キー長押しによる連続入力（リピート）を防止
+    if (e.repeat && k.length === 1) {
       e.preventDefault();
-      insert(k);
-    } else if (k === 'Backspace') {
+      return;
+    }
+    if (k === 'Backspace') {
       e.preventDefault();
-      if (slots[active]) clearSlot(active);
-      else if (active > 0) clearSlot(active - 1, true);
+      lastBackspaceAtRef.current = Date.now();
+      handleBackspace();
     } else if (k === 'Delete') {
       e.preventDefault();
-      clearSlot(active);
+      clearSlot(activeRef.current);
     } else if (k === 'ArrowLeft') {
       e.preventDefault();
-      jumpActive(Math.max(active - 1, 0));
+      jumpActive(Math.max(activeRef.current - 1, 0));
     } else if (k === 'ArrowRight') {
       e.preventDefault();
-      jumpActive(Math.min(active + 1, length - 1));
+      jumpActive(Math.min(activeRef.current + 1, length - 1));
     } else if (k === 'Home') {
       e.preventDefault();
       jumpActive(0);
@@ -278,20 +297,48 @@ const CodeSlots: React.FC<CodeSlotsProps> = ({
       jumpActive(length - 1);
     }
   };
+  const onBeforeInput = (e: React.FormEvent<HTMLInputElement>) => {
+    if (isBusy()) return;
+    const native = e.nativeEvent as InputEvent;
+    if (native.inputType === 'deleteContentBackward') {
+      if (Date.now() - lastBackspaceAtRef.current > 80) {
+        e.preventDefault();
+        lastBackspaceAtRef.current = Date.now();
+        handleBackspace();
+      }
+    }
+  };
   const onPaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
     if (isBusy()) return;
     e.preventDefault();
-    insert(e.clipboardData.getData('text'));
+    insert(e.clipboardData.getData('text'), activeRef.current);
   };
   const onInput = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const raw = e.target.value;
+    if (composingRef.current) return;
+    e.target.value = '';
     if (isBusy()) return;
-    const d = digitsOf(e.target.value);
+    const d = digitsOf(raw);
     if (!d) return;
-    insert(d, d.length === 1 ? active : 0);
+    insert(d, d.length === 1 ? activeRef.current : 0);
   };
-  const onRowMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+  const onCompositionStart = () => {
+    composingRef.current = true;
+  };
+  const onCompositionEnd = (e: React.CompositionEvent<HTMLInputElement>) => {
+    composingRef.current = false;
+    const raw = e.currentTarget.value;
+    e.currentTarget.value = '';
+    if (isBusy()) return;
+    const d = digitsOf(raw);
+    if (!d) return;
+    insert(d, d.length === 1 ? activeRef.current : 0);
+  };
+  const onRowPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (disabled) return;
-    e.preventDefault();
+    if (e.pointerType === 'mouse') {
+      e.preventDefault();
+    }
     const row = rowRef.current;
     if (row && !draining.current && status !== 'success') {
       const rect = row.getBoundingClientRect();
@@ -440,7 +487,7 @@ const CodeSlots: React.FC<CodeSlotsProps> = ({
         data-status={status}
         data-focused={focused ? '' : undefined}
         data-disabled={disabled ? '' : undefined}
-        onMouseDown={onRowMouseDown}
+        onPointerDown={onRowPointerDown}
       >
         <input
           ref={inputRef}
@@ -449,16 +496,18 @@ const CodeSlots: React.FC<CodeSlotsProps> = ({
           inputMode="numeric"
           autoComplete="one-time-code"
           pattern="[0-9]*"
-          value=""
-          maxLength={length}
+          defaultValue=""
           aria-label={ariaLabel}
           aria-invalid={status === 'error'}
           aria-describedby={`${uid}-count`}
           disabled={disabled}
           readOnly={status === 'success'}
           onKeyDown={onKeyDown}
+          onBeforeInput={onBeforeInput}
           onPaste={onPaste}
           onChange={onInput}
+          onCompositionStart={onCompositionStart}
+          onCompositionEnd={onCompositionEnd}
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}
         />

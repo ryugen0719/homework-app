@@ -13,8 +13,8 @@ import {
   ChevronLeft,
   ChevronRight,
   Clock,
-  Copy,
   ImagePlus,
+  KeyRound,
   LoaderCircle,
   LogOut,
   Moon,
@@ -42,6 +42,7 @@ import ProfileModal from '../components/ProfileModal';
 import ImageCropModal from '../components/ImageCropModal';
 import StudyComposerModal from '../components/StudyComposerModal';
 import TeacherReviewModal from '../components/TeacherReviewModal';
+import TeacherPasswordModal from '../components/TeacherPasswordModal';
 import { formatDuration, formatDurationCompact } from '../lib/format-duration';
 import {
   getSoundMuted,
@@ -200,12 +201,11 @@ function EvidencePreview({
   );
 }
 
-export default function Home({ initialRole = '生徒', accessToken = '' }: { initialRole?: '生徒' | '先生'; accessToken?: string }) {
+export default function Home() {
   const storedAuth = useSyncExternalStore(subscribeAuth, getAuthSnapshot, () => '');
   const [authOverride, setAuthOverride] = useState<{ token: string; role: '生徒' | '先生' } | null>(null);
 
   const { token, role } = useMemo(() => {
-    if (accessToken) return { token: accessToken, role: initialRole };
     if (authOverride) return authOverride;
     if (storedAuth) {
       try {
@@ -213,13 +213,13 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
         if (parsed.token) {
           return {
             token: parsed.token as string,
-            role: (parsed.role as '生徒' | '先生') || initialRole,
+            role: (parsed.role as '生徒' | '先生') || '生徒',
           };
         }
       } catch { }
     }
-    return { token: '', role: initialRole };
-  }, [accessToken, initialRole, authOverride, storedAuth]);
+    return { token: '', role: '生徒' as const };
+  }, [authOverride, storedAuth]);
 
   // クライアントマウント判定
   const authChecked = useSyncExternalStore(emptySubscribe, () => true, () => false);
@@ -264,31 +264,19 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
     }
   }
 
-  // URLからaccessTokenが直接渡された場合のみ、外部ストレージに保存
-  useEffect(() => {
-    if (accessToken) {
-      try {
-        localStorage.setItem(
-          'homework_auth',
-          JSON.stringify({ token: accessToken, role: initialRole })
-        );
-      } catch { }
-    }
-  }, [accessToken, initialRole]);
-
   // 生徒一覧と選択中の生徒
   const [students, setStudents] = useState<StudentInfo[]>([]);
   const [selectedStudentId, setSelectedStudentId] = useState<string>('default-student');
   const [studentModalOpen, setStudentModalOpen] = useState(false);
+  const [teacherPasswordModalOpen, setTeacherPasswordModalOpen] = useState(false);
   const [profileModalOpen, setProfileModalOpen] = useState(false);
   const [profileRefreshKey, setProfileRefreshKey] = useState(0);
   const [newStudentName, setNewStudentName] = useState('');
   const [newStudentDisplayName, setNewStudentDisplayName] = useState('');
   const [newStudentColor, setNewStudentColor] = useState<string>(DEFAULT_STUDENT_COLORS[0]);
-  const [newStudentIcon, setNewStudentIcon] = useState('book');
+  const [newStudentIcon] = useState('book');
   const [newStudentPassword, setNewStudentPassword] = useState('1234');
   const [studentModalError, setStudentModalError] = useState('');
-  const [copiedStudentId, setCopiedStudentId] = useState('');
   const [creatingStudent, setCreatingStudent] = useState(false);
 
   // 既存生徒の編集ステート
@@ -1020,15 +1008,6 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
     );
   };
 
-  // 生徒専用URLのコピー
-  const copyStudentUrl = (studentToken: string, studentId: string) => {
-    const origin = typeof window !== 'undefined' ? window.location.origin : '';
-    const url = `${origin}/s/${studentToken}`;
-    navigator.clipboard.writeText(url);
-    setCopiedStudentId(studentId);
-    setTimeout(() => setCopiedStudentId(''), 2000);
-  };
-
   // 未ログイン状態の場合、ログイン画面を表示
   if (authChecked && !token) {
     return (
@@ -1075,7 +1054,7 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
           </span>
           <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
             <span className="font-extrabold text-sm sm:text-base tracking-tight text-ink whitespace-nowrap">宿題ノート</span>
-            <span className="text-[10px] sm:text-[11px] font-bold px-1.5 sm:px-2 py-0.5 rounded-md bg-card-subtle border border-line text-muted shrink-0">
+            <span className="text-[10px] sm:text-[11px] font-bold px-1.5 sm:px-2 py-0.5 rounded-md bg-card-subtle text-muted shrink-0">
               {role}用
             </span>
           </div>
@@ -1084,16 +1063,28 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
         {/* 先生・生徒別のアカウント表示/切り替えUI */}
         <div className="flex items-center gap-1.5 sm:gap-2 ml-auto">
           {role === '先生' ? (
-            <button
-              type="button"
-              onClick={handleLogout}
-              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold rounded-xl text-muted hover:text-ink hover:bg-card-subtle transition-all cursor-pointer"
-              title="ログアウト"
-              aria-label="ログアウト"
-            >
-              <LogOut size={14} />
-              <span className="hidden sm:inline">ログアウト</span>
-            </button>
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => setTeacherPasswordModalOpen(true)}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold rounded-xl text-muted hover:text-ink hover:bg-card-subtle transition-all cursor-pointer"
+                title="先生パスワードを変更"
+                aria-label="先生パスワードを変更"
+              >
+                <KeyRound size={14} />
+                <span className="hidden sm:inline">PW変更</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleLogout}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold rounded-xl text-muted hover:text-ink hover:bg-card-subtle transition-all cursor-pointer"
+                title="ログアウト"
+                aria-label="ログアウト"
+              >
+                <LogOut size={14} />
+                <span className="hidden sm:inline">ログアウト</span>
+              </button>
+            </div>
           ) : (
             /* 生徒用: アイコンタップでプロフィールカード（切り替え・アイコン変更・各種設定）を表示 */
             <div className="flex items-center gap-1.5 sm:gap-2">
@@ -1104,7 +1095,7 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
                     playAppSound('breeze');
                     setProfileModalOpen(true);
                   }}
-                  className="inline-flex items-center gap-2 p-1 sm:pr-3 rounded-full bg-card border border-line hover:border-primary/50 text-xs font-bold text-ink shadow-subtle transition-all cursor-pointer active:scale-95 max-w-[160px] sm:max-w-[200px]"
+                  className="inline-flex items-center gap-2 p-1 sm:pr-3 rounded-full bg-card hover:bg-card-subtle text-xs font-bold text-ink shadow-subtle transition-all cursor-pointer active:scale-95 max-w-[160px] sm:max-w-[200px]"
                   title="プロフィール・設定・切り替えを開く"
                   aria-label="プロフィールを開く"
                 >
@@ -1120,18 +1111,6 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
                 </button>
               )}
             </div>
-          )}
-
-          {today && (day !== today || currentMonth !== today.slice(0, 7)) && (
-            <button
-              type="button"
-              className={ui.todayBadgeBtn}
-              onClick={goToToday}
-              title="今日の日付に戻る"
-            >
-              <RotateCcw size={13} />
-              <span>今日</span>
-            </button>
           )}
 
           <button
@@ -1159,10 +1138,10 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
                     key={s.id}
                     type="button"
                     onClick={() => handleSelectStudent(s.id)}
-                    className={`inline-flex items-center gap-2 pl-1.5 pr-3 py-1.5 rounded-full text-xs font-bold border transition-all cursor-pointer ${
+                    className={`inline-flex items-center gap-2 pl-1.5 pr-3 py-1.5 rounded-full text-xs font-bold transition-all cursor-pointer ${
                       active
-                        ? 'bg-primary text-white border-primary shadow-subtle'
-                        : 'bg-card hover:bg-card-subtle text-ink border-line'
+                        ? 'bg-primary text-white shadow-subtle'
+                        : 'bg-card-subtle/75 hover:bg-card-subtle text-ink'
                     }`}
                   >
                     <StudentAvatar
@@ -1182,7 +1161,7 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
               <button
                 type="button"
                 onClick={() => setStudentModalOpen(true)}
-                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-bold border border-dashed border-line-strong bg-card hover:border-primary/60 text-muted hover:text-primary transition-all cursor-pointer"
+                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-bold bg-transparent hover:bg-card-subtle text-muted hover:text-primary transition-all cursor-pointer"
                 title="生徒の追加・編集・URLコピー"
               >
                 <Users size={13} />
@@ -1193,7 +1172,7 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
             {/* 先生用2タブ切り替え */}
             <div className="flex items-center gap-2.5 ml-auto">
               {dataReady && unreviewedDates.length === 0 && (
-                <span className="hidden sm:inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-reward-soft text-reward-ink border border-reward-line/40 text-xs font-bold">
+                <span className="hidden sm:inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-reward-soft text-reward-ink text-xs font-bold">
                   <Check size={12} strokeWidth={2.8} />
                   <span>すべて確認済み</span>
                 </span>
@@ -1221,14 +1200,14 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
                 radius={12}
                 inset={3}
                 equalSlots={true}
-                className="border border-line shadow-card"
+                className="shadow-card"
               />
             </div>
           </div>
 
           {/* 未確認がある場合のみコンパクトなワンタップバーを表示 */}
           {currentTab === 'calendar' && dataReady && unreviewedDates.length > 0 && (
-            <div className="flex flex-wrap items-center gap-2 px-3.5 py-2.5 rounded-2xl border border-amber-500/30 bg-amber-500/[0.06]">
+            <div className="flex flex-wrap items-center gap-2 px-3.5 py-2.5 rounded-2xl bg-amber-500/10">
               <span className="inline-flex items-center gap-1.5 text-xs font-extrabold text-amber-800 dark:text-amber-300 shrink-0 mr-1">
                 <Clock size={13} />
                 <span>未確認 {unreviewedDates.length}件</span>
@@ -1243,10 +1222,10 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
                       setSelectedMonth(item.date.slice(0, 7));
                       setSelectedDate(item.date);
                     }}
-                    className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold transition-all border cursor-pointer ${
+                    className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                       day === item.date
-                        ? 'bg-primary text-white border-primary shadow-subtle'
-                        : 'bg-card hover:bg-card-subtle text-ink border-line'
+                        ? 'bg-primary text-white shadow-subtle'
+                        : 'bg-card hover:bg-card-subtle text-ink shadow-subtle'
                     }`}
                   >
                     <span>{formatDate(item.date)}</span>
@@ -1287,7 +1266,7 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
             radius={14}
             inset={4}
             equalSlots={true}
-            className="w-full sm:w-auto border border-line shadow-card"
+            className="w-full sm:w-auto shadow-card"
           />
         </div>
       )}
@@ -1327,17 +1306,30 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
                     <span>{calendarRangeLabel}</span>
                   </div>
 
-                  <button
-                    type="button"
-                    className={ui.calendarViewToggle}
-                    onClick={() => setCalendarView(calendarView === 'week' ? 'month' : 'week')}
-                    aria-expanded={calendarView === 'month'}
-                    aria-controls="calendar-days"
-                    aria-label={calendarView === 'week' ? '月全体を見る' : '週間表示に戻る'}
-                    title={calendarView === 'week' ? '月全体を見る' : '週間表示に戻る'}
-                  >
-                    <span>{calendarView === 'week' ? '月' : '週'}</span>
-                  </button>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {today && (day !== today || currentMonth !== today.slice(0, 7)) && (
+                      <button
+                        type="button"
+                        className={ui.todayBadgeBtn}
+                        onClick={goToToday}
+                        title="今日の日付に戻る"
+                      >
+                        <RotateCcw size={13} />
+                        <span>今日</span>
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      className={ui.calendarViewToggle}
+                      onClick={() => setCalendarView(calendarView === 'week' ? 'month' : 'week')}
+                      aria-expanded={calendarView === 'month'}
+                      aria-controls="calendar-days"
+                      aria-label={calendarView === 'week' ? '月全体を見る' : '週間表示に戻る'}
+                      title={calendarView === 'week' ? '月全体を見る' : '週間表示に戻る'}
+                    >
+                      <span>{calendarView === 'week' ? '月' : '週'}</span>
+                    </button>
+                  </div>
                 </div>
 
                 {/* 曜日ヘッダー */}
@@ -1378,7 +1370,7 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
                         key={cell.date}
                         type="button"
                         disabled={calendarView === 'month' && !cell.isCurrentMonth}
-                        className={`${ui.calendarCell} ${calendarView === 'week' ? ui.calendarCellWeek : ''} ${calendarView === 'month' && !cell.isCurrentMonth ? ui.calendarCellOtherMonth : ''} ${isSelected ? ui.calendarCellSelected : ''} ${isToday && !isSelected ? ui.calendarCellToday : ''} ${isFuture ? ui.calendarCellFuture : ''} ${hasRecord && !isSelected ? 'bg-reward-soft/35 border-reward/20' : ''}`}
+                        className={`${ui.calendarCell} ${calendarView === 'week' ? ui.calendarCellWeek : ''} ${calendarView === 'month' && !cell.isCurrentMonth ? ui.calendarCellOtherMonth : ''} ${isSelected ? ui.calendarCellSelected : ''} ${isToday && !isSelected ? ui.calendarCellToday : ''} ${isFuture ? ui.calendarCellFuture : ''} ${hasRecord && !isSelected ? 'bg-reward-soft/45' : ''}`}
                         onClick={() => {
                           teacherManuallyNavigated.current = true;
                           if (cell.date.slice(0, 7) !== currentMonth) setSelectedMonth(cell.date.slice(0, 7));
@@ -1455,19 +1447,19 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
                       </h2>
                       {sessions.length > 0 && (
                         savedReview.reviewedAt ? (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-reward-soft text-reward-ink border border-reward-line/40 text-[11px] font-bold shrink-0">
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-reward-soft text-reward-ink text-[11px] font-bold shrink-0">
                             <Check size={11} strokeWidth={3} />
                             確認済み
                           </span>
                         ) : (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-800 dark:text-amber-300 border border-amber-500/30 text-[11px] font-bold shrink-0">
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-800 dark:text-amber-300 text-[11px] font-bold shrink-0">
                             未確認
                           </span>
                         )
                       )}
                     </div>
                     {sessions.length > 0 && (
-                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-card-subtle border border-line/70 text-xs font-bold text-muted font-numbers shrink-0">
+                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-card-subtle text-xs font-bold text-muted font-numbers shrink-0">
                         <Clock size={12} className="text-primary" />
                         {dayMinutes > 0 ? `${formatDuration(dayMinutes)} · ` : ''}
                         {sessions.length}件
@@ -1477,7 +1469,7 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
 
                   {/* 先生確認コメント（一番上にコンパクト表示 ＋ ボタンでモーダル起動） */}
                   {sessions.length > 0 && (
-                    <div className="mb-4 rounded-2xl border border-line bg-card-subtle/40 px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+                    <div className="mb-4 rounded-2xl bg-card-subtle/60 px-4 py-3 flex flex-wrap items-center justify-between gap-3">
                       <div className="min-w-0 flex-1">
                         {savedReview.reviewedAt ? (
                           <>
@@ -1508,7 +1500,7 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
                         }}
                         className={
                           savedReview.reviewedAt
-                            ? 'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-line bg-card hover:bg-card-subtle text-xs font-bold text-ink transition-all cursor-pointer shrink-0'
+                            ? 'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-card hover:bg-card-subtle text-xs font-bold text-ink shadow-subtle transition-all cursor-pointer shrink-0'
                             : 'inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-primary !text-white text-xs font-bold hover:bg-primary-hover active:scale-95 transition-all shadow-subtle cursor-pointer shrink-0'
                         }
                       >
@@ -1570,7 +1562,7 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
                         {day === today ? '今日の勉強' : `${day ? formatDate(day) : ''}の勉強`}
                       </h2>
                       {sessions.length > 0 && (
-                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-card-subtle border border-line/70 text-xs font-bold text-muted font-numbers shrink-0">
+                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-card-subtle text-xs font-bold text-muted font-numbers shrink-0">
                           <Clock size={12} className="text-primary" />
                           {dayMinutes > 0 ? `${formatDuration(dayMinutes)} · ` : ''}
                           {sessions.length}件
@@ -2023,25 +2015,6 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
                         <PencilLine size={13} className="text-primary" />
                         <span>名前変更</span>
                       </button>
-
-                      <button
-                        type="button"
-                        onClick={() => copyStudentUrl(student.token, student.id)}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-xl bg-card border border-line hover:border-primary/40 text-ink shadow-subtle transition-all cursor-pointer"
-                        title="生徒専用のログインURLをコピー"
-                      >
-                        {copiedStudentId === student.id ? (
-                          <>
-                            <Check size={14} className="text-emerald-500" />
-                            <span>URLコピー完了!</span>
-                          </>
-                        ) : (
-                          <>
-                            <Copy size={13} className="text-muted" />
-                            <span>URLコピー</span>
-                          </>
-                        )}
-                      </button>
                     </div>
                   </div>
                 );
@@ -2180,6 +2153,18 @@ export default function Home({ initialRole = '生徒', accessToken = '' }: { ini
           saving={saving}
           disabled={!dataReady || Boolean(uploading)}
           pointPreview={pointPreview}
+        />
+      )}
+
+      {/* 先生用: パスワード変更モーダル */}
+      {role === '先生' && teacherPasswordModalOpen && (
+        <TeacherPasswordModal
+          token={token}
+          onClose={() => setTeacherPasswordModalOpen(false)}
+          onSaved={() => {
+            setTeacherPasswordModalOpen(false);
+            notify('先生パスワードを変更しました');
+          }}
         />
       )}
 

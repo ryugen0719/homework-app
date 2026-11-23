@@ -19,6 +19,7 @@ import {
   X,
 } from 'lucide-react';
 import { formatDuration } from '../lib/format-duration';
+import GlideSelect from '../components/GlideSelect/GlideSelect';
 
 export type StudySession = {
   id: string;
@@ -295,7 +296,7 @@ export default function TimelineView({
       <div className="space-y-3 max-w-3xl mx-auto w-full">
         <div className="flex flex-wrap items-center justify-between gap-3">
           {/* 表示モード切り替え: ストリーム / 写真アルバム */}
-          <div className="inline-flex p-1 rounded-xl bg-card-subtle border border-line text-xs font-semibold">
+          <div className="inline-flex p-1 rounded-xl bg-card-subtle text-xs font-semibold">
             <button
               type="button"
               onClick={() => setDisplayMode('stream')}
@@ -328,7 +329,7 @@ export default function TimelineView({
               type="button"
               onClick={onRequestAllData}
               disabled={loadingAll}
-              className="inline-flex items-center gap-1.5 text-xs font-semibold text-primary hover:text-primary-hover px-3 py-1.5 rounded-xl border border-line bg-card hover:border-primary/40 transition-all cursor-pointer disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 text-xs font-semibold text-primary-ink bg-primary-soft hover:bg-primary/15 px-3 py-1.5 rounded-xl transition-all cursor-pointer disabled:opacity-50"
             >
               {loadingAll && <LoaderCircle size={13} className="animate-spin" aria-hidden="true" />}
               <span>{loadingAll ? '読み込み中…' : '全期間を取得'}</span>
@@ -360,35 +361,47 @@ export default function TimelineView({
             )}
           </div>
 
-          {/* 月選択 */}
+          {/* 月選択（React Bits GlideSelect） */}
           <div className="flex items-center gap-1.5">
-            <Filter size={14} className="text-muted" />
-            <select
+            <Filter size={14} className="text-muted shrink-0" />
+            <GlideSelect
+              ariaLabel="月で絞り込み"
               value={monthFilter}
-              onChange={(e) => setMonthFilter(e.target.value)}
-              className="px-3 py-2 text-xs sm:text-sm rounded-xl border border-line bg-card text-ink focus:outline-none focus:border-primary shadow-subtle cursor-pointer font-medium"
-              aria-label="月で絞り込み"
-            >
-              <option value="all">すべての期間</option>
-              {availableMonths.map((m) => {
-                const [y, mo] = m.split('-');
-                return (
-                  <option key={m} value={m}>
-                    {y}年 {Number(mo)}月
-                  </option>
-                );
-              })}
-            </select>
+              onChange={(val) => setMonthFilter(val)}
+              size="md"
+              radius={12}
+              menuWidth={184}
+              surfaceColor="var(--card)"
+              highlightColor="var(--card-subtle)"
+              textColor="var(--text)"
+              accentColor="var(--primary)"
+              options={[
+                {
+                  value: 'all',
+                  label: 'すべての期間',
+                  tag: `${allDaysWithRecords.length}日`,
+                },
+                ...availableMonths.map((m) => {
+                  const [y, mo] = m.split('-');
+                  const count = allDaysWithRecords.filter((d) => d.date.startsWith(m)).length;
+                  return {
+                    value: m,
+                    label: `${y}年 ${Number(mo)}月`,
+                    tag: count > 0 ? `${count}日` : undefined,
+                  };
+                }),
+              ]}
+            />
           </div>
 
           {/* 写真ありフィルター */}
           <button
             type="button"
             onClick={() => setOnlyWithPhoto(!onlyWithPhoto)}
-            className={`inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-xl border transition-all cursor-pointer shadow-subtle active:scale-95 ${
+            className={`inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-xl transition-all cursor-pointer active:scale-95 ${
               onlyWithPhoto
-                ? 'bg-primary text-white border-primary shadow-subtle'
-                : 'border-line bg-card text-muted hover:text-ink hover:border-line-strong'
+                ? 'bg-primary text-white shadow-subtle'
+                : 'bg-card-subtle/80 text-muted hover:text-ink hover:bg-card-subtle'
             }`}
           >
             <ImageIcon size={13} />
@@ -404,10 +417,10 @@ export default function TimelineView({
                 setOnlyUnreviewed(next);
                 if (next) setOnlyReviewed(false);
               }}
-              className={`inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-xl border transition-all cursor-pointer shadow-subtle active:scale-95 ${
+              className={`inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-xl transition-all cursor-pointer active:scale-95 ${
                 onlyUnreviewed
-                  ? 'bg-amber-600 text-white border-amber-600 shadow-subtle'
-                  : 'border-line bg-card text-muted hover:text-ink hover:border-line-strong'
+                  ? 'bg-amber-600 text-white shadow-subtle'
+                  : 'bg-card-subtle/80 text-muted hover:text-ink hover:bg-card-subtle'
               }`}
             >
               <Clock size={13} />
@@ -423,10 +436,10 @@ export default function TimelineView({
               setOnlyReviewed(next);
               if (next) setOnlyUnreviewed(false);
             }}
-            className={`inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-xl border transition-all cursor-pointer shadow-subtle active:scale-95 ${
+            className={`inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-xl transition-all cursor-pointer active:scale-95 ${
               onlyReviewed
-                ? 'bg-reward text-white border-reward shadow-subtle'
-                : 'border-line bg-card text-muted hover:text-ink hover:border-line-strong'
+                ? 'bg-reward text-white shadow-subtle'
+                : 'bg-card-subtle/80 text-muted hover:text-ink hover:bg-card-subtle'
             }`}
           >
             <CheckCircle2 size={13} />
@@ -437,7 +450,7 @@ export default function TimelineView({
           <button
             type="button"
             onClick={() => setSortOrder(sortOrder === 'desc' ? 'asc' : 'desc')}
-            className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-xl border border-line bg-card text-muted hover:text-ink hover:border-line-strong transition-all cursor-pointer ml-auto shadow-subtle active:scale-95"
+            className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-xl bg-card-subtle/80 text-muted hover:text-ink hover:bg-card-subtle transition-all cursor-pointer ml-auto active:scale-95"
             title={sortOrder === 'desc' ? '新しい順（最新が上）' : '古い順（昔から）'}
           >
             <ArrowDownUp size={13} />
@@ -477,7 +490,7 @@ export default function TimelineView({
 
       {/* コンテンツエリア */}
       {filteredDays.length === 0 ? (
-        <div className="max-w-3xl mx-auto w-full rounded-2xl border border-line bg-card p-10 sm:p-14 text-center shadow-card">
+        <div className="max-w-3xl mx-auto w-full rounded-2xl bg-card p-10 sm:p-14 text-center shadow-card">
           <Clock size={40} className="mx-auto mb-3 opacity-40 text-muted" />
           <h3 className="text-base sm:text-lg font-bold text-ink mb-2">記録が見つかりませんでした</h3>
           <p className="text-xs sm:text-sm max-w-md mx-auto mb-6 text-ink/75 leading-relaxed">
@@ -501,7 +514,7 @@ export default function TimelineView({
       ) : displayMode === 'gallery' ? (
         /* 写真アルバムギャラリーモード */
         allPhotos.length === 0 ? (
-          <div className="rounded-2xl border border-line bg-card p-12 text-center text-muted shadow-card">
+          <div className="rounded-2xl bg-card p-12 text-center text-muted shadow-card">
             <ImageIcon size={36} className="mx-auto mb-3 opacity-30 text-muted" />
             <h3 className="text-sm sm:text-base font-bold text-ink mb-1">提出された写真がありません</h3>
             <p className="text-xs sm:text-sm max-w-sm mx-auto">
@@ -515,7 +528,7 @@ export default function TimelineView({
               return (
                 <div
                   key={`${photo.evidencePath}-${pIdx}`}
-                  className="rounded-2xl border border-line bg-card p-3 shadow-card hover:shadow-card-hover hover:border-line-strong transition-all flex flex-col justify-between"
+                  className="rounded-2xl bg-card p-3 shadow-card hover:shadow-card-hover transition-all flex flex-col justify-between"
                 >
                   <div>
                     <TimelineInlinePhoto
@@ -529,7 +542,7 @@ export default function TimelineView({
                         {photo.content}
                       </p>
                       {photo.reviewComment && (
-                        <p className="mt-1.5 text-xs text-reward-ink bg-reward-soft/50 p-2 rounded-lg border border-reward-line/30 line-clamp-2 m-0">
+                        <p className="mt-1.5 text-xs text-reward-ink bg-reward-soft/55 p-2 rounded-lg line-clamp-2 m-0">
                           先生: {photo.reviewComment}
                         </p>
                       )}
@@ -564,24 +577,22 @@ export default function TimelineView({
             return (
               <article
                 key={dayItem.date}
-                className="rounded-2xl border border-line bg-card shadow-card overflow-hidden transition-all hover:border-line-strong"
+                className="rounded-2xl bg-card shadow-card overflow-hidden transition-all"
               >
                 {/* 日付ヘッダーバー */}
-                <div className="bg-card-subtle/70 px-4 sm:px-5 py-3 border-b border-line flex flex-wrap items-center justify-between gap-2">
+                <div className="bg-[#E5ECF4] dark:bg-card-subtle/60 px-4 sm:px-5 py-3 flex flex-wrap items-center justify-between gap-2">
                   <div className="flex items-center gap-2">
-                    <span className="p-1 rounded-lg bg-card border border-line text-primary">
-                      <Calendar size={15} />
-                    </span>
+                    <Calendar size={15} className="text-primary shrink-0" />
                     <span className="font-numbers text-sm sm:text-base font-bold text-ink tracking-tight">
                       {dateInfo.year}年 {dateInfo.display}
                     </span>
                     {isToday && (
-                      <span className="px-2 py-0.5 text-[10px] font-bold rounded-md bg-primary text-white shadow-subtle">
+                      <span className="px-2 py-0.5 text-[10px] font-bold rounded-full bg-primary text-white">
                         今日
                       </span>
                     )}
                     {dayItem.review?.reviewedAt && (
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-bold rounded-md bg-reward-soft text-reward-ink border border-reward-line/40">
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-bold rounded-full bg-reward-soft text-reward-ink">
                         <Award size={11} />
                         確認済み
                       </span>
@@ -590,7 +601,7 @@ export default function TimelineView({
 
                   <div className="flex items-center gap-3">
                     {dayMinutes > 0 && (
-                      <span className="text-xs font-semibold px-2 py-0.5 rounded-md bg-card border border-line text-muted font-numbers">
+                      <span className="text-xs font-semibold text-muted font-numbers">
                         計 {formatDuration(dayMinutes)}
                       </span>
                     )}

@@ -214,6 +214,47 @@ export function getTeacherCredentials() {
 }
 
 /**
+ * 先生のパスワードを検証（Firestore にカスタムパスワードが保存されている場合はそちらを優先）
+ */
+export async function verifyTeacherPassword(password: string): Promise<boolean> {
+  try {
+    const db = database();
+    const doc = await db.collection('settings').doc('teacher').get();
+    if (doc.exists) {
+      const data = doc.data() || {};
+      if (typeof data.passwordHash === 'string' && typeof data.passwordSalt === 'string') {
+        return verifyPassword(password, data.passwordHash, data.passwordSalt);
+      }
+    }
+  } catch {
+    // Firestore 読み取りエラー時は環境変数フォールバックへ
+  }
+
+  const teacher = getTeacherCredentials();
+  return Boolean(
+    password === teacher.password ||
+      (process.env.TEACHER_TOKEN && password === process.env.TEACHER_TOKEN.slice(0, 8)) ||
+      password === 'teacher1234'
+  );
+}
+
+/**
+ * 先生のパスワードを Firestore にハッシュ保存して更新
+ */
+export async function updateTeacherPassword(newPassword: string): Promise<void> {
+  const db = database();
+  const { hash, salt } = hashPassword(newPassword);
+  await db.collection('settings').doc('teacher').set(
+    {
+      passwordHash: hash,
+      passwordSalt: salt,
+      updatedAt: new Date().toISOString(),
+    },
+    { merge: true }
+  );
+}
+
+/**
  * 初期生徒が存在することを確認し、なければ作成する
  */
 export async function ensureDefaultStudent(teacherId = 'default-teacher'): Promise<Student> {

@@ -323,8 +323,8 @@ export default function LoginView({ onLoginSuccess }: LoginViewProps) {
                       radius={14}
                       accentColor="var(--primary)"
                       slotColor="var(--card-subtle)"
-                      digitColor="var(--text)"
-                      inkColor="#ffffff"
+                      digitColor="#ffffff"
+                      inkColor="var(--primary)"
                       dangerColor="var(--error)"
                       ariaLabel="4桁のPINコード"
                       onChange={(code) => {

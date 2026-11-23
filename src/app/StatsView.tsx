@@ -20,6 +20,7 @@ import {
 import type { DayEntry } from './TimelineView';
 import CountUp from '../components/CountUp/CountUp';
 import AchievementDeck from '../components/AchievementDeck';
+import GlideSelect from '../components/GlideSelect/GlideSelect';
 import { formatDuration } from '../lib/format-duration';
 
 interface StatsViewProps {
@@ -265,30 +266,28 @@ export default function StatsView({
 
   return (
     <div className="flex flex-col gap-6 w-full">
-      {/* 期間選択バー（カード枠を廃しキャンバスに直接配置） */}
+      {/* 期間選択バー（React Bits GlideSelect） */}
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="inline-flex items-center gap-1 p-1 rounded-xl bg-card-subtle border border-line overflow-x-auto max-w-full">
-          {(
-            [
-              { key: 'this-month', label: '今月' },
-              { key: 'last-month', label: '先月' },
-              { key: 'last-30', label: '直近30日' },
-              { key: 'all', label: '全期間' },
-            ] as const
-          ).map((item) => (
-            <button
-              key={item.key}
-              type="button"
-              onClick={() => setPeriod(item.key)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
-                period === item.key
-                  ? 'bg-card text-ink shadow-subtle'
-                  : 'text-muted hover:text-ink'
-              }`}
-            >
-              {item.label}
-            </button>
-          ))}
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-bold text-muted">集計期間</span>
+          <GlideSelect
+            ariaLabel="集計期間を選択"
+            value={period}
+            onChange={(val) => setPeriod(val as PeriodType)}
+            size="md"
+            radius={12}
+            menuWidth={172}
+            surfaceColor="var(--card)"
+            highlightColor="var(--card-subtle)"
+            textColor="var(--text)"
+            accentColor="var(--primary)"
+            options={[
+              { value: 'this-month', label: '今月' },
+              { value: 'last-month', label: '先月' },
+              { value: 'last-30', label: '直近30日' },
+              { value: 'all', label: '全期間' },
+            ]}
+          />
         </div>
 
         {!hasLoadedAll && onRequestAllData && (
@@ -296,7 +295,7 @@ export default function StatsView({
             type="button"
             onClick={onRequestAllData}
             disabled={loadingAll}
-            className="inline-flex items-center gap-1.5 text-xs font-semibold text-primary hover:text-primary-hover px-3 py-1.5 rounded-xl border border-line bg-card hover:border-primary/40 transition-all cursor-pointer disabled:opacity-50"
+            className="inline-flex items-center gap-1.5 text-xs font-semibold text-primary-ink bg-primary-soft hover:bg-primary/15 px-3 py-1.5 rounded-xl transition-all cursor-pointer disabled:opacity-50"
           >
             {loadingAll && <LoaderCircle size={13} className="animate-spin" aria-hidden="true" />}
             <span>{loadingAll ? '読み込み中…' : '全期間を取得'}</span>
@@ -304,8 +303,8 @@ export default function StatsView({
         )}
       </div>
 
-      {/* エディトリアル・学習サマリー（主役と脇役の明確な階層設計） */}
-      <section className="rounded-2xl border border-line bg-card p-5 sm:p-6 shadow-card">
+      {/* エディトリアル・学習サマリー（外枠なし） */}
+      <section className="rounded-2xl bg-card p-5 sm:p-6 shadow-card">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-center">
           {/* 主役: 総学習時間 */}
           <div className="lg:col-span-5 border-b lg:border-b-0 lg:border-r border-line/60 pb-5 lg:pb-0 lg:pr-6">
@@ -372,7 +371,7 @@ export default function StatsView({
       </section>
 
       {/* 学習時間の推移チャート（Recharts） */}
-      <section className="rounded-2xl border border-line bg-card p-4 sm:p-6 shadow-card w-full min-w-0">
+      <section className="rounded-2xl bg-card p-4 sm:p-6 shadow-card w-full min-w-0">
         <div className="flex flex-wrap items-center justify-between gap-2 mb-5">
           <h3 className="text-base font-bold text-ink flex items-center gap-2 m-0">
             <BarChart3 size={17} className="text-primary" />
@@ -463,7 +462,7 @@ export default function StatsView({
       {/* 2カラム構成: 曜日別分布 & 教科別内訳 */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
         {/* 曜日別の学習傾向 */}
-        <section className="rounded-2xl border border-line bg-card p-4 sm:p-5 shadow-card">
+        <section className="rounded-2xl bg-card p-4 sm:p-5 shadow-card">
           <h3 className="text-base font-bold text-ink flex items-center gap-2 mb-1 m-0">
             <Calendar size={17} className="text-primary" />
             <span>曜日ごとの学習傾向</span>
@@ -486,7 +485,7 @@ export default function StatsView({
                   >
                     {dow.name}
                   </span>
-                  <div className="flex-1 h-2.5 rounded-full bg-card-subtle border border-line/40 overflow-hidden">
+                  <div className="flex-1 h-2.5 rounded-full bg-card-subtle overflow-hidden">
                     <div
                       className={`h-full rounded-full transition-all duration-500 ${
                         isWeekend ? 'bg-reward' : 'bg-primary'
@@ -504,7 +503,7 @@ export default function StatsView({
         </section>
 
         {/* 教科・学習テーマ別の内訳 */}
-        <section className="rounded-2xl border border-line bg-card p-4 sm:p-5 shadow-card">
+        <section className="rounded-2xl bg-card p-4 sm:p-5 shadow-card">
           <h3 className="text-base font-bold text-ink flex items-center gap-2 mb-1 m-0">
             <PieChart size={17} className="text-primary" />
             <span>教科・学習テーマの内訳</span>
@@ -532,7 +531,7 @@ export default function StatsView({
                         <strong className="text-ink">{formatDuration(sub.minutes)}</strong>（{sub.count}回 / {percent}%）
                       </span>
                     </div>
-                    <div className="h-2 w-full rounded-full bg-card-subtle border border-line/40 overflow-hidden">
+                    <div className="h-2 w-full rounded-full bg-card-subtle overflow-hidden">
                       <div
                         className="h-full rounded-full transition-all duration-500"
                         style={{ width: `${percent}%`, backgroundColor: sub.color }}
