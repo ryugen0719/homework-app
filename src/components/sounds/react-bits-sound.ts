@@ -989,7 +989,7 @@ export async function renderSound(recipe: Recipe, tune: Tune = {}, options: Rend
 }
 
 let sharedContext: AudioContext | null = null;
-let masterVolume = 1;
+let masterVolume = 0.35;
 let muted = false;
 const cache = new Map<string, Promise<AudioBuffer>>();
 const ids = new WeakMap<Recipe, number>();

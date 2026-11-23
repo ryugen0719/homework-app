@@ -118,6 +118,7 @@ export function syncAppSoundMuted(role: SoundRole = activeSoundRole) {
 export function preloadAppSounds() {
   if (typeof window === 'undefined') return;
   syncAppSoundMuted();
+  setSoundVolume(0.35);
   (Object.values(SOUND_RECIPES) as Recipe[]).forEach((recipe) => {
     preloadSound(recipe);
   });
@@ -126,6 +127,7 @@ export function preloadAppSounds() {
 export function playAppSound(name: AppSoundName, tune?: Tune) {
   if (typeof window === 'undefined') return;
   syncAppSoundMuted();
+  setSoundVolume(0.35);
   const recipe = SOUND_RECIPES[name];
   if (!recipe) return;
   void playSound(recipe, tune).catch(() => undefined);
