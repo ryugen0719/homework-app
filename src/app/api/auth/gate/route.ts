@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getAuth } from 'firebase-admin/auth';
+
+export const dynamic = 'force-dynamic';
 import {
   createGateToken,
   GATE_COOKIE_NAME,

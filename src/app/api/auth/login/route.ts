@@ -15,7 +15,10 @@ function respond(message: string, status = 400) {
 export async function POST(request: Request) {
   const gate = verifyGateRequest(request);
   if (!gate.ok) {
-    return respond('先に許可されたGoogleアカウントで認証してください', 401);
+    return NextResponse.json(
+      { error: '先に許可されたGoogleアカウントで認証してください', gateRequired: true },
+      { status: 401, headers: { 'Cache-Control': 'no-store' } }
+    );
   }
 
   try {

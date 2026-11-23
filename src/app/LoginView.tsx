@@ -41,9 +41,10 @@ interface LoginSuccessData {
 
 interface LoginViewProps {
   onLoginSuccess: (data: LoginSuccessData) => void;
+  onGateRequired?: () => void;
 }
 
-export default function LoginView({ onLoginSuccess }: LoginViewProps) {
+export default function LoginView({ onLoginSuccess, onGateRequired }: LoginViewProps) {
   const [activeTab, setActiveTab] = useState<'student' | 'teacher'>('student');
   const [students, setStudents] = useState<PublicStudent[]>([]);
   const [loadingStudents, setLoadingStudents] = useState(true);
@@ -64,9 +65,19 @@ export default function LoginView({ onLoginSuccess }: LoginViewProps) {
   useEffect(() => {
     let active = true;
     fetch('/api/auth/students-list', { cache: 'no-store' })
-      .then((res) => (res.ok ? res.json() : null))
+      .then(async (res) => {
+        if (res.status === 401) {
+          onGateRequired?.();
+          return null;
+        }
+        return res.ok ? res.json() : null;
+      })
       .then((data) => {
         if (!active || !data) return;
+        if (data.gateRequired) {
+          onGateRequired?.();
+          return;
+        }
         if (data.students && Array.isArray(data.students)) {
           setStudents(data.students);
           if (data.students.length > 0) {
@@ -82,7 +93,7 @@ export default function LoginView({ onLoginSuccess }: LoginViewProps) {
     return () => {
       active = false;
     };
-  }, []);
+  }, [onGateRequired]);
 
   const submitStudentLogin = async (passwordToTry: string) => {
     if (!selectedStudentName.trim() || !passwordToTry.trim()) {
@@ -107,6 +118,10 @@ export default function LoginView({ onLoginSuccess }: LoginViewProps) {
 
       const data = await res.json();
       if (!res.ok) {
+        if (res.status === 401 && data.gateRequired) {
+          onGateRequired?.();
+          return;
+        }
         setPinStatus('error');
         setErrorMessage(data.error || 'ログインできませんでした');
         return;
@@ -156,6 +171,10 @@ export default function LoginView({ onLoginSuccess }: LoginViewProps) {
 
       const data = await res.json();
       if (!res.ok) {
+        if (res.status === 401 && data.gateRequired) {
+          onGateRequired?.();
+          return;
+        }
         setErrorMessage(data.error || 'ログインできませんでした');
         return;
       }

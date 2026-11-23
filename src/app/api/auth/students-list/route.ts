@@ -16,7 +16,7 @@ function json(data: unknown, status = 200) {
 export async function GET(request: Request) {
   const gate = verifyGateRequest(request);
   if (!gate.ok) {
-    return json({ error: 'Google認証が必要です', students: [] }, 401);
+    return json({ error: 'Google認証が必要です', gateRequired: true, students: [] }, 401);
   }
 
   try {

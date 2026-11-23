@@ -1214,7 +1214,13 @@ export default function Home() {
             />
           ) : (
             <div className="space-y-4">
-              <LoginView onLoginSuccess={handleLoginSuccess} />
+              <LoginView
+                onLoginSuccess={handleLoginSuccess}
+                onGateRequired={() => {
+                  setGateEmail(null);
+                  setGateState('locked');
+                }}
+              />
               {gateEmail && (
                 <p className="m-0 text-center text-xs text-muted">
                   Google認証済み: <span className="font-mono">{gateEmail}</span>
