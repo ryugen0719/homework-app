@@ -275,7 +275,7 @@ export async function PUT(request: Request) {
     if (action === 'session-photo') {
       if (auth.role !== 'student' || !validDate(value.date) || !isStudentDate(value.date) || !validSessionId(value.sessionId) || typeof value.evidencePath !== 'string') return respond('写真を確認できません', 403);
       const parsed = parseEvidencePath(value.evidencePath);
-      if (!parsed || parsed.date !== value.date || parsed.sessionId !== value.sessionId) return respond('写真を確認できません', 400);
+      if (!parsed || parsed.studentId !== auth.studentId || parsed.date !== value.date || parsed.sessionId !== value.sessionId) return respond('写真を確認できません', 400);
 
       const blob = await head(value.evidencePath);
       if (!['image/jpeg', 'image/png', 'image/webp'].includes(blob.contentType) || blob.size > 5 * 1024 * 1024) return respond('画像は5MB以下のJPEG、PNG、WebPにしてください', 400);

@@ -329,12 +329,12 @@ export async function verifyTeacherPassword(password: string): Promise<boolean> 
     // Firestore 読み取りエラー時は環境変数フォールバックへ
   }
 
-  const teacher = getTeacherCredentials();
-  return Boolean(
-    password === teacher.password ||
-      (process.env.TEACHER_TOKEN && password === process.env.TEACHER_TOKEN.slice(0, 8)) ||
-      password === 'teacher1234'
-  );
+  // 環境変数 TEACHER_PASSWORD が明示設定されている場合はそれのみ許可（ハードコード初期値を通さない）
+  if (process.env.TEACHER_PASSWORD) {
+    return password === process.env.TEACHER_PASSWORD;
+  }
+
+  return process.env.NODE_ENV !== 'production' && password === 'teacher1234';
 }
 
 /**

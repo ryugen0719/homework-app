@@ -46,6 +46,8 @@ import LivePresencePill from '../components/LivePresencePill';
 import LiveStudyBar from '../components/LiveStudyBar';
 import SubjectBadge from '../components/SubjectBadge';
 import AppTitle from '../components/AppTitle';
+import GoogleGateView from '../components/GoogleGateView';
+import { signOutGoogleGate } from '../lib/firebase-client';
 import { useLiveTimer } from '../hooks/useLiveTimer';
 import TeacherReviewModal from '../components/TeacherReviewModal';
 import TeacherPasswordModal from '../components/TeacherPasswordModal';
@@ -229,6 +231,40 @@ export default function Home() {
 
   // クライアントマウント判定
   const authChecked = useSyncExternalStore(emptySubscribe, () => true, () => false);
+
+  // Google認証ゲート状態（未ログイン時のみ確認）
+  const [gateState, setGateState] = useState<'checking' | 'locked' | 'open'>('checking');
+  const [gateEmail, setGateEmail] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!authChecked || token) return;
+    let active = true;
+    fetch('/api/auth/gate', { cache: 'no-store' })
+      .then((res) => (res.ok ? res.json() : { enabled: false, authenticated: true }))
+      .then((data: { enabled?: boolean; authenticated?: boolean; email?: string | null }) => {
+        if (!active) return;
+        if (data.enabled && !data.authenticated) {
+          setGateState('locked');
+          setGateEmail(null);
+        } else {
+          setGateState('open');
+          setGateEmail(data.email || null);
+        }
+      })
+      .catch(() => {
+        if (active) setGateState('open');
+      });
+    return () => {
+      active = false;
+    };
+  }, [authChecked, token]);
+
+  const handleResetGoogleGate = async () => {
+    await fetch('/api/auth/gate', { method: 'DELETE' }).catch(() => undefined);
+    await signOutGoogleGate();
+    setGateEmail(null);
+    setGateState('locked');
+  };
 
   const today = useSyncExternalStore(emptySubscribe, todayJst, () => '');
   const storedTheme = useSyncExternalStore(subscribeTheme, getThemeSnapshot, () => 'light' as const);
@@ -1147,12 +1183,12 @@ export default function Home() {
     );
   };
 
-  // 未ログイン状態の場合、ログイン画面を表示
+  // 未ログイン状態の場合、Google認証ゲート → 従来のログイン画面の順で表示
   if (authChecked && !token) {
     return (
       <div className={ui.shell}>
         <header className={ui.header}>
-          <AppTitle variant="header" badge="ログイン" />
+          <AppTitle variant="header" badge={gateState === 'locked' ? 'メンバー確認' : 'ログイン'} />
           <button
             type="button"
             className={ui.themeToggle}
@@ -1165,7 +1201,35 @@ export default function Home() {
         </header>
 
         <main className="py-6 sm:py-10">
-          <LoginView onLoginSuccess={handleLoginSuccess} />
+          {gateState === 'checking' ? (
+            <div className="min-h-[60vh] grid place-items-center">
+              <LoaderCircle size={26} className="animate-spin text-primary" aria-label="読み込み中" />
+            </div>
+          ) : gateState === 'locked' ? (
+            <GoogleGateView
+              onVerified={(email) => {
+                setGateEmail(email);
+                setGateState('open');
+              }}
+            />
+          ) : (
+            <div className="space-y-4">
+              <LoginView onLoginSuccess={handleLoginSuccess} />
+              {gateEmail && (
+                <p className="m-0 text-center text-xs text-muted">
+                  Google認証済み: <span className="font-mono">{gateEmail}</span>
+                  {' · '}
+                  <button
+                    type="button"
+                    onClick={() => void handleResetGoogleGate()}
+                    className="text-primary hover:underline font-semibold cursor-pointer"
+                  >
+                    アカウント切り替え
+                  </button>
+                </p>
+              )}
+            </div>
+          )}
         </main>
       </div>
     );

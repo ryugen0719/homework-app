@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { database, ensureDefaultStudent } from '../../../../lib/homework-server';
+import { verifyGateRequest } from '../../../../lib/google-gate';
 
 function json(data: unknown, status = 200) {
   return NextResponse.json(data, {
@@ -12,7 +13,12 @@ function json(data: unknown, status = 200) {
  * ログイン画面用の公開生徒リスト
  * ※ プライバシー保護: トークン、パスワード、学習データは一切含めず、選択肢表示用情報のみ返す
  */
-export async function GET() {
+export async function GET(request: Request) {
+  const gate = verifyGateRequest(request);
+  if (!gate.ok) {
+    return json({ error: 'Google認証が必要です', students: [] }, 401);
+  }
+
   try {
     const db = database();
     await ensureDefaultStudent();

@@ -1,10 +1,16 @@
 import { get } from '@vercel/blob';
 import { NextRequest, NextResponse } from 'next/server';
+import { verifyGateRequest } from '../../../lib/google-gate';
 
 const VALID_AVATAR_PATH = /^avatars\/[a-zA-Z0-9_-]+-\d+\.(jpg|png|webp|gif)$/;
 const ALLOWED_CONTENT_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
 
 export async function GET(request: NextRequest) {
+  const gate = verifyGateRequest(request);
+  if (!gate.ok) {
+    return new NextResponse('Unauthorized', { status: 401, headers: { 'Cache-Control': 'no-store' } });
+  }
+
   const pathname = request.nextUrl.searchParams.get('pathname') || '';
   if (!VALID_AVATAR_PATH.test(pathname)) {
     return new NextResponse('Not found', { status: 404 });
@@ -24,7 +30,8 @@ export async function GET(request: NextRequest) {
       status: 200,
       headers: {
         'Content-Type': blob.blob.contentType,
-        'Cache-Control': 'public, max-age=31536000, immutable',
+        'Cache-Control': gate.enabled ? 'private, max-age=86400' : 'public, max-age=31536000, immutable',
+        'Content-Security-Policy': "default-src 'none'; sandbox",
         'X-Content-Type-Options': 'nosniff',
       },
     });

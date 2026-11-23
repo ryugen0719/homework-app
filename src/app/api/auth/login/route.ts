@@ -6,12 +6,18 @@ import {
   verifyPassword,
   verifyTeacherPassword,
 } from '../../../../lib/homework-server';
+import { verifyGateRequest } from '../../../../lib/google-gate';
 
 function respond(message: string, status = 400) {
   return NextResponse.json({ error: message }, { status, headers: { 'Cache-Control': 'no-store' } });
 }
 
 export async function POST(request: Request) {
+  const gate = verifyGateRequest(request);
+  if (!gate.ok) {
+    return respond('先に許可されたGoogleアカウントで認証してください', 401);
+  }
+
   try {
     const body = (await request.json()) as {
       role?: unknown;
