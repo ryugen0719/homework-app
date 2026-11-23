@@ -1,26 +1,7 @@
 import crypto from 'node:crypto';
-import { cert, getApps, initializeApp, type App } from 'firebase-admin/app';
 
 export const GATE_COOKIE_NAME = 'hw_gate';
 const GATE_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30日
-
-function getFirebaseAdminApp(): App {
-  const existing = getApps()[0];
-  if (existing) return existing;
-
-  const projectId = process.env.FIREBASE_PROJECT_ID;
-  const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
-  const privateKey = process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n');
-  if (!projectId || !clientEmail || !privateKey) {
-    throw new Error('Firebase is not configured');
-  }
-  return initializeApp({
-    credential: cert({ projectId, clientEmail, privateKey }),
-    projectId,
-  });
-}
-
-export { getFirebaseAdminApp };
 
 /**
  * 許可されたGoogleメールアドレス一覧を取得（環境変数 ALLOWED_GOOGLE_EMAILS）

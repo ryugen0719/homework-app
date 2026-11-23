@@ -1,10 +1,8 @@
 import { NextResponse } from 'next/server';
-import { getAuth } from 'firebase-admin/auth';
 import {
   createGateToken,
   GATE_COOKIE_NAME,
   getAllowedGoogleEmails,
-  getFirebaseAdminApp,
   isGoogleGateEnabled,
   verifyGateRequest,
 } from '../../../../lib/google-gate';
@@ -16,13 +14,66 @@ function json(data: unknown, status = 200) {
   });
 }
 
+/**
+ * Firebase Identity Toolkit REST API で ID トークンを公式検証し、
+ * メールアドレス・検証済み状態・アカウント有効状態を取得する。
+ * （firebase-admin/auth のバンドル依存を持たないため、Serverless環境でも軽量・安定動作する）
+ */
+async function verifyFirebaseIdTokenViaRest(idToken: string): Promise<{
+  email: string;
+  emailVerified: boolean;
+  disabled: boolean;
+}> {
+  const apiKey = process.env.NEXT_PUBLIC_FIREBASE_API_KEY || process.env.FIREBASE_WEB_API_KEY || '';
+  if (!apiKey) {
+    throw new Error('Firebase Web API key is not configured');
+  }
+
+  const res = await fetch(
+    `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${encodeURIComponent(apiKey)}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ idToken }),
+      cache: 'no-store',
+    }
+  );
+
+  if (!res.ok) {
+    throw new Error(`Token verification failed (${res.status})`);
+  }
+
+  const data = (await res.json()) as {
+    users?: Array<{
+      email?: string;
+      emailVerified?: boolean;
+      disabled?: boolean;
+    }>;
+  };
+  const user = data.users?.[0];
+  if (!user || typeof user.email !== 'string') {
+    throw new Error('User not found for token');
+  }
+
+  return {
+    email: user.email.trim().toLowerCase(),
+    emailVerified: Boolean(user.emailVerified),
+    disabled: Boolean(user.disabled),
+  };
+}
+
 export async function GET(request: Request) {
-  const result = verifyGateRequest(request);
-  return json({
-    enabled: result.enabled,
-    authenticated: result.ok,
-    email: result.email,
-  });
+  try {
+    const result = verifyGateRequest(request);
+    return json({
+      enabled: result.enabled,
+      authenticated: result.ok,
+      email: result.email,
+    });
+  } catch (err) {
+    console.error('[gate GET] error:', err);
+    return json({ error: '認証状態の確認に失敗しました' }, 500);
+  }
 }
 
 export async function POST(request: Request) {
@@ -37,27 +88,29 @@ export async function POST(request: Request) {
       return json({ error: '認証トークンが見つかりません' }, 400);
     }
 
-    const app = getFirebaseAdminApp();
-    const decoded = await getAuth(app).verifyIdToken(idToken);
-    const email = (decoded.email || '').trim().toLowerCase();
+    const user = await verifyFirebaseIdTokenViaRest(idToken);
 
-    if (!email || decoded.email_verified !== true) {
+    if (user.disabled) {
+      return json({ error: 'このGoogleアカウントは無効化されています' }, 403);
+    }
+
+    if (!user.email || !user.emailVerified) {
       return json({ error: 'メールアドレスが確認されたGoogleアカウントを使用してください' }, 403);
     }
 
     const allowed = getAllowedGoogleEmails();
-    if (!allowed.has(email)) {
+    if (!allowed.has(user.email)) {
       return json(
         {
-          error: `このGoogleアカウント（${email}）はアクセスが許可されていません`,
-          deniedEmail: email,
+          error: `このGoogleアカウント（${user.email}）はアクセスが許可されていません`,
+          deniedEmail: user.email,
         },
         403
       );
     }
 
-    const sessionToken = createGateToken(email);
-    const response = json({ ok: true, email });
+    const sessionToken = createGateToken(user.email);
+    const response = json({ ok: true, email: user.email });
     response.cookies.set({
       name: GATE_COOKIE_NAME,
       value: sessionToken,
@@ -68,7 +121,8 @@ export async function POST(request: Request) {
       maxAge: 30 * 24 * 60 * 60,
     });
     return response;
-  } catch {
+  } catch (err) {
+    console.error('[gate POST] error:', err);
     return json({ error: 'Google認証の確認に失敗しました。もう一度お試しください。' }, 401);
   }
 }
