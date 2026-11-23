@@ -40,6 +40,7 @@ interface ProfileModalProps {
   soundMuted: boolean;
   monthRecordedDays?: number;
   monthTotalMinutes?: number;
+  isLiveActive?: boolean;
   onToggleTheme: () => void;
   onToggleSound: () => void;
   onSwitchAccount: () => void;
@@ -65,6 +66,7 @@ export default function ProfileModal({
   soundMuted,
   monthRecordedDays = 0,
   monthTotalMinutes = 0,
+  isLiveActive = false,
   onToggleTheme,
   onToggleSound,
   onSwitchAccount,
@@ -396,13 +398,21 @@ export default function ProfileModal({
 
                 <button
                   type="button"
+                  disabled={isLiveActive}
                   onClick={onSwitchAccount}
-                  className="inline-flex items-center justify-center gap-1.5 px-5 py-2.5 rounded-full border border-line-strong bg-card-subtle/60 hover:bg-card-subtle text-ink text-xs sm:text-sm font-bold active:scale-95 transition-all cursor-pointer"
+                  title={isLiveActive ? 'タイマー計測中はアカウントを切り替えられません' : 'アカウントを切り替える'}
+                  className="inline-flex items-center justify-center gap-1.5 px-5 py-2.5 rounded-full border border-line-strong bg-card-subtle/60 hover:bg-card-subtle text-ink text-xs sm:text-sm font-bold active:scale-95 transition-all cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed disabled:active:scale-100"
                 >
                   <ArrowLeftRight size={14} />
                   <span>アカウント切り替え</span>
                 </button>
               </div>
+
+              {isLiveActive && (
+                <p className="m-0 mt-2.5 text-[11px] font-semibold text-amber-700 dark:text-amber-300">
+                  タイマー計測中はアカウントを切り替えられません。先に終了またはキャンセルしてください。
+                </p>
+              )}
             </div>
 
             {error && (

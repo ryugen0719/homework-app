@@ -19,6 +19,7 @@ import {
   LogOut,
   Moon,
   PencilLine,
+  Play,
   Plus,
   RotateCcw,
   Sun,
@@ -41,6 +42,10 @@ import StudentAvatar, {
 import ProfileModal from '../components/ProfileModal';
 import ImageCropModal from '../components/ImageCropModal';
 import StudyComposerModal from '../components/StudyComposerModal';
+import ConfirmDialog, { ConfirmDialogOptions } from '../components/ConfirmDialog';
+import LivePresencePill from '../components/LivePresencePill';
+import LiveStudyBar from '../components/LiveStudyBar';
+import { useLiveTimer } from '../hooks/useLiveTimer';
 import TeacherReviewModal from '../components/TeacherReviewModal';
 import TeacherPasswordModal from '../components/TeacherPasswordModal';
 import { formatDuration, formatDurationCompact } from '../lib/format-duration';
@@ -317,7 +322,10 @@ export default function Home() {
   const [uploading, setUploading] = useState('');
   const [uploadPercent, setUploadPercent] = useState(0);
   const [showPastComposer, setShowPastComposer] = useState(false);
+  const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogOptions | null>(null);
+  const [pendingLiveMeta, setPendingLiveMeta] = useState<{ startedAt: string; endedAt: string } | null>(null);
   const [reviewModalOpen, setReviewModalOpen] = useState(false);
+  const live = useLiveTimer(token, role === '生徒' && Boolean(token));
   const [cropTask, setCropTask] = useState<
     | { mode: 'evidence'; file: File; session: StudySession }
     | { mode: 'avatar'; file: File }
@@ -713,10 +721,24 @@ export default function Home() {
   }
 
   function startEdit(session: StudySession) {
-    if (draft.content.trim() && draft.id !== session.id && !window.confirm('入力中の内容を破棄して、この記録を編集しますか？')) return;
-    setDrafts((current) => ({ ...current, [day]: { id: session.id, content: session.content, minutes: session.minutes?.toString() || '' } }));
-    setError('');
-    setShowPastComposer(true);
+    const proceed = () => {
+      setDrafts((current) => ({ ...current, [day]: { id: session.id, content: session.content, minutes: session.minutes?.toString() || '' } }));
+      setError('');
+      setShowPastComposer(true);
+    };
+    if (draft.content.trim() && draft.id !== session.id) {
+      setConfirmDialog({
+        title: '入力中の内容を破棄しますか？',
+        description: '保存していない下書きを消して、選んだ記録の編集を開きます。',
+        confirmLabel: '破棄して編集',
+        cancelLabel: 'そのままにする',
+        tone: 'warning',
+        icon: 'warning',
+        onConfirm: proceed,
+      });
+      return;
+    }
+    proceed();
   }
 
   function openNewComposer() {
@@ -728,6 +750,81 @@ export default function Home() {
     setShowPastComposer(true);
   }
 
+  async function handleStartLiveStudy() {
+    if (live.busy) return;
+    const ok = await live.start();
+    if (ok) {
+      playAppSound('breeze');
+      notify('勉強タイマーを開始しました');
+    } else {
+      setError('タイマーを開始できませんでした。通信状況を確認してください。');
+    }
+  }
+
+  function handleCancelLiveStudy() {
+    if (live.busy) return;
+    setConfirmDialog({
+      title: '計測をキャンセルしますか？',
+      description: 'これまでの計測時間は記録されずにリセットされます。',
+      confirmLabel: '計測をやめる',
+      cancelLabel: '続ける',
+      tone: 'danger',
+      icon: 'timer',
+      onConfirm: async () => {
+        const ok = await live.cancel();
+        if (ok) {
+          setPendingLiveMeta(null);
+          playAppSound('erase');
+          notify('計測をキャンセルしました');
+        }
+      },
+    });
+  }
+
+  async function handleFinishLiveStudy() {
+    if (live.busy) return;
+    const result = await live.prepareFinish();
+    if (!result) {
+      setError('タイマーを終了できませんでした。もう一度お試しください。');
+      return;
+    }
+
+    if (result.flooredMinutes < 1) {
+      setConfirmDialog({
+        title: '1分未満のため記録されません',
+        description: 'このままタイマーを終了しますか？\n「続ける」を選ぶと一時停止のまま再開できます。',
+        confirmLabel: '記録せず終了',
+        cancelLabel: '続ける',
+        tone: 'warning',
+        icon: 'timer',
+        onConfirm: async () => {
+          await live.cancel();
+          setPendingLiveMeta(null);
+          notify('タイマーを終了しました');
+        },
+      });
+      return;
+    }
+
+    const targetDay = today || day;
+    if (today) {
+      setSelectedMonth(today.slice(0, 7));
+      setSelectedDate(today);
+    }
+    setDrafts((current) => ({
+      ...current,
+      [targetDay]: {
+        id: '',
+        content: current[targetDay]?.id ? '' : current[targetDay]?.content || '',
+        minutes: String(result.flooredMinutes),
+      },
+    }));
+    setPendingLiveMeta({ startedAt: result.startedAt, endedAt: result.endedAt });
+    setError('');
+    playAppSound('breeze');
+    setShowPastComposer(true);
+  }
+
   async function saveSession(): Promise<boolean> {
     const content = draft.content.trim();
     const minutes = draft.minutes.trim() ? Number(draft.minutes) : undefined;
@@ -736,12 +833,32 @@ export default function Home() {
     const id = draft.id || crypto.randomUUID();
     const existing = sessions.find((session) => session.id === id);
     const now = new Date().toISOString();
+    const isLiveFinish = Boolean(pendingLiveMeta && !existing);
     const next: StudySession = { id, content, ...(minutes ? { minutes } : {}), ...(existing?.evidencePath ? { evidencePath: existing.evidencePath } : {}), createdAt: existing?.createdAt || now, updatedAt: now };
     setSaving(true); setError('');
-    const response = await put({ action: 'session-save', date: day, id, content, ...(minutes ? { minutes } : {}) });
+    const response = await put({
+      action: 'session-save',
+      date: day,
+      id,
+      content,
+      ...(minutes ? { minutes } : {}),
+      ...(isLiveFinish && pendingLiveMeta
+        ? {
+            source: 'live',
+            startedAt: pendingLiveMeta.startedAt,
+            endedAt: pendingLiveMeta.endedAt,
+            clearLiveTimer: true,
+          }
+        : {}),
+    });
     if (!response?.ok) { setError('記録を保存できませんでした。入力は残っています。もう一度お試しください。'); setSaving(false); return false; }
     updateDay(day, { sessions: existing ? sessions.map((item) => item.id === id ? next : item) : [...sessions, next] });
     setDrafts((current) => { const nextDrafts = { ...current }; delete nextDrafts[day]; return nextDrafts; });
+    if (isLiveFinish) {
+      setPendingLiveMeta(null);
+      void live.refresh();
+    }
+    setProfileRefreshKey((k) => k + 1);
     setSaving(false);
     if (existing) {
       notify('記録を更新しました');
@@ -749,16 +866,25 @@ export default function Home() {
     return true;
   }
 
-  async function deleteSession(session: StudySession) {
-    if (!window.confirm('この記録を削除しますか？')) return;
-    setSaving(true); setError('');
-    const response = await put({ action: 'session-delete', date: day, id: session.id });
-    if (!response?.ok) { setError('記録を削除できませんでした。もう一度お試しください。'); setSaving(false); return; }
-    updateDay(day, { sessions: sessions.filter((item) => item.id !== session.id) });
-    if (draft.id === session.id) setDrafts((current) => { const next = { ...current }; delete next[day]; return next; });
-    setSaving(false);
-    playAppSound('erase');
-    notify('記録を削除しました');
+  function deleteSession(session: StudySession) {
+    setConfirmDialog({
+      title: 'この記録を削除しますか？',
+      description: '削除した記録と添付写真は元に戻せません。',
+      confirmLabel: '削除する',
+      cancelLabel: 'やめる',
+      tone: 'danger',
+      icon: 'trash',
+      onConfirm: async () => {
+        setSaving(true); setError('');
+        const response = await put({ action: 'session-delete', date: day, sessionId: session.id });
+        if (!response?.ok) { setError('記録を削除できませんでした。もう一度お試しください。'); setSaving(false); return; }
+        updateDay(day, { sessions: sessions.filter((item) => item.id !== session.id) });
+        if (draft.id === session.id) setDrafts((current) => { const next = { ...current }; delete next[day]; return next; });
+        setSaving(false);
+        playAppSound('erase');
+        notify('記録を削除しました');
+      },
+    });
   }
 
   async function saveReview(jumpToNext = false): Promise<boolean> {
@@ -938,20 +1064,32 @@ export default function Home() {
 
   // ログアウト処理
   const handleLogout = () => {
-    if (window.confirm('ログアウトしますか？')) {
-      try {
-        localStorage.removeItem('homework_auth');
-      } catch { }
-      setAuthOverride({ token: '', role: '生徒' });
-      // キャッシュとステートを完全にリセット
-      setEntries({});
-      setLoadedMonths({});
-      setDrafts({});
-      setReviewDrafts({});
-      setHasLoadedAll(false);
-      setStudents([]);
-      notify('ログアウトしました');
+    if (role === '生徒' && live.myTimer) {
+      toast.error('タイマー計測中はアカウントを切り替えられません。先に終了またはキャンセルしてください。');
+      return;
     }
+    setConfirmDialog({
+      title: 'ログアウトしますか？',
+      description: 'ログイン画面に戻ります。別のアカウントへ切り替えることもできます。',
+      confirmLabel: 'ログアウト',
+      cancelLabel: 'キャンセル',
+      tone: 'primary',
+      icon: 'logout',
+      onConfirm: () => {
+        try {
+          localStorage.removeItem('homework_auth');
+        } catch { }
+        setAuthOverride({ token: '', role: '生徒' });
+        // キャッシュとステートを完全にリセット
+        setEntries({});
+        setLoadedMonths({});
+        setDrafts({});
+        setReviewDrafts({});
+        setHasLoadedAll(false);
+        setStudents([]);
+        notify('ログアウトしました');
+      },
+    });
   };
 
   // ログイン成功時の処理
@@ -1045,7 +1183,7 @@ export default function Home() {
   }
 
   return (
-    <div className={ui.shell}>
+    <div className={`${ui.shell} ${role === '生徒' && live.myTimer ? 'pb-24' : ''}`}>
       {/* ヘッダー */}
       <header className={ui.header}>
         <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
@@ -1239,8 +1377,8 @@ export default function Home() {
           )}
         </section>
       ) : (
-        /* 生徒用: 4タブ切り替え（React Bits RubberSegment） */
-        <div className="mb-6">
+        /* 生徒用: 4タブ切り替え（React Bits RubberSegment）＋ 勉強中プレゼンス */
+        <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
           <RubberSegment
             aria-label="表示モードの切り替え"
             value={currentTab}
@@ -1268,6 +1406,16 @@ export default function Home() {
             equalSlots={true}
             className="w-full sm:w-auto shadow-card"
           />
+
+          {currentTab !== 'ranking' && live.otherRunningMembers.length > 0 && (
+            <LivePresencePill
+              members={live.otherRunningMembers}
+              onClick={() => {
+                playAppSound('tab');
+                setActiveTab('ranking');
+              }}
+            />
+          )}
         </div>
       )}
 
@@ -1570,16 +1718,30 @@ export default function Home() {
                       )}
                     </div>
 
-                    {/* 上部配置の追加ボタン（モーダルを開く） */}
+                    {/* 上部配置の追加ボタン（モーダルを開く・タイマー開始） */}
                     {canLog && sessions.length > 0 && (
-                      <button
-                        type="button"
-                        onClick={openNewComposer}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-primary !text-white text-xs font-bold hover:bg-primary-hover active:scale-95 transition-all shadow-subtle cursor-pointer shrink-0"
-                      >
-                        <Plus size={14} strokeWidth={2.5} className="!text-white" />
-                        <span className="!text-white">{!draft.id && draft.content.trim() ? '下書きを再開' : '記録を追加'}</span>
-                      </button>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        {day === today && !live.myTimer && (
+                          <button
+                            type="button"
+                            disabled={live.busy}
+                            onClick={() => void handleStartLiveStudy()}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-reward-soft hover:bg-reward/20 text-reward-ink text-xs font-bold active:scale-95 transition-all cursor-pointer disabled:opacity-50"
+                            title="リアルタイムで勉強時間を計測する"
+                          >
+                            <Play size={13} className="fill-current" />
+                            <span>タイマー</span>
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={openNewComposer}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-primary !text-white text-xs font-bold hover:bg-primary-hover active:scale-95 transition-all shadow-subtle cursor-pointer shrink-0"
+                        >
+                          <Plus size={14} strokeWidth={2.5} className="!text-white" />
+                          <span className="!text-white">{!draft.id && draft.content.trim() ? '下書きを再開' : '記録を追加'}</span>
+                        </button>
+                      </div>
                     )}
                   </div>
 
@@ -1606,14 +1768,27 @@ export default function Home() {
                         {day === today ? '今日の勉強記録はまだありません。' : 'この日の勉強記録はまだありません。'}
                       </p>
                       {canLog && (
-                        <button
-                          type="button"
-                          onClick={openNewComposer}
-                          className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-primary !text-white text-sm font-bold hover:bg-primary-hover active:scale-95 transition-all shadow-subtle cursor-pointer"
-                        >
-                          <Plus size={16} strokeWidth={2.5} className="!text-white" />
-                          <span className="!text-white">{!draft.id && draft.content.trim() ? '下書きの続きから記録する' : '勉強を記録する'}</span>
-                        </button>
+                        <div className="flex flex-wrap items-center justify-center gap-2.5">
+                          {day === today && !live.myTimer && (
+                            <button
+                              type="button"
+                              disabled={live.busy}
+                              onClick={() => void handleStartLiveStudy()}
+                              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-reward-soft hover:bg-reward/20 text-reward-ink text-sm font-bold active:scale-95 transition-all cursor-pointer disabled:opacity-50"
+                            >
+                              <Play size={15} className="fill-current" />
+                              <span>タイマーで勉強する</span>
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={openNewComposer}
+                            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-primary !text-white text-sm font-bold hover:bg-primary-hover active:scale-95 transition-all shadow-subtle cursor-pointer"
+                          >
+                            <Plus size={16} strokeWidth={2.5} className="!text-white" />
+                            <span className="!text-white">{!draft.id && draft.content.trim() ? '下書きの続きから記録する' : '勉強を記録する'}</span>
+                          </button>
+                        </div>
                       )}
                     </div>
                   )}
@@ -1760,6 +1935,16 @@ export default function Home() {
           role={role}
           currentStudentId={selectedStudentId}
           refreshKey={profileRefreshKey}
+          liveMembers={live.liveMembers}
+          myTimer={live.myTimer}
+          myElapsedSec={live.myElapsedSec}
+          liveBusy={live.busy}
+          theme={theme}
+          onToggleTheme={toggleTheme}
+          onStartLive={() => void handleStartLiveStudy()}
+          onPauseLive={() => void live.pause()}
+          onResumeLive={() => void live.resume()}
+          onFinishLive={() => void handleFinishLiveStudy()}
         />
       )}
 
@@ -2134,7 +2319,12 @@ export default function Home() {
       {role === '生徒' && canLog && (
         <StudyComposerModal
           open={showPastComposer}
-          onOpenChange={setShowPastComposer}
+          onOpenChange={(nextOpen) => {
+            setShowPastComposer(nextOpen);
+            if (!nextOpen) {
+              setPendingLiveMeta(null);
+            }
+          }}
           dateLabel={day === today ? `今日（${day ? formatDate(day) : ''}）` : day ? formatDate(day) : ''}
           dayTotalMinutes={dayMinutes}
           draft={draft}
@@ -2155,6 +2345,31 @@ export default function Home() {
           pointPreview={pointPreview}
         />
       )}
+
+      {/* 生徒用: リアルタイム勉強タイマーミニバー */}
+      {role === '生徒' && live.myTimer && (
+        <LiveStudyBar
+          timer={live.myTimer}
+          elapsedSec={live.myElapsedSec}
+          busy={live.busy}
+          showRaceShortcut={currentTab !== 'ranking'}
+          onPause={() => void live.pause()}
+          onResume={() => void live.resume()}
+          onFinish={() => void handleFinishLiveStudy()}
+          onCancel={handleCancelLiveStudy}
+          onOpenRace={() => {
+            playAppSound('tab');
+            setActiveTab('ranking');
+          }}
+        />
+      )}
+
+      {/* アプリ統一デザインの確認ダイアログ */}
+      <ConfirmDialog
+        options={confirmDialog}
+        busy={saving || live.busy}
+        onClose={() => setConfirmDialog(null)}
+      />
 
       {/* 先生用: パスワード変更モーダル */}
       {role === '先生' && teacherPasswordModalOpen && (
@@ -2177,6 +2392,7 @@ export default function Home() {
           soundMuted={soundMuted}
           monthRecordedDays={monthRecordedDays}
           monthTotalMinutes={monthTotalMinutes}
+          isLiveActive={Boolean(live.myTimer)}
           onToggleTheme={toggleTheme}
           onToggleSound={toggleSound}
           onSwitchAccount={() => {

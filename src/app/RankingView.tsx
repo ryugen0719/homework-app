@@ -19,13 +19,22 @@ import {
   Flame,
   History,
   Info,
+  Maximize2,
+  Play,
   RefreshCw,
 } from 'lucide-react';
 import StudentAvatar from '../components/StudentAvatar';
 import CountUp from '../components/CountUp/CountUp';
 import GlideSelect from '../components/GlideSelect/GlideSelect';
 import DateRangePicker from '../components/DateRangePicker';
+import RaceFullscreenOverlay from '../components/RaceFullscreenOverlay';
 import { formatDuration } from '../lib/format-duration';
+import {
+  formatTimerClock,
+  getLapProgress,
+  LiveMemberComputed,
+  LiveTimerState,
+} from '../hooks/useLiveTimer';
 
 type RankingPeriod =
   | 'this-week'
@@ -107,6 +116,16 @@ interface RankingViewProps {
   role: '生徒' | '先生';
   currentStudentId?: string;
   refreshKey?: number;
+  liveMembers?: LiveMemberComputed[];
+  myTimer?: LiveTimerState | null;
+  myElapsedSec?: number;
+  liveBusy?: boolean;
+  theme?: 'light' | 'dark';
+  onToggleTheme?: () => void;
+  onStartLive?: () => void;
+  onPauseLive?: () => void;
+  onResumeLive?: () => void;
+  onFinishLive?: () => void;
 }
 
 const PERIOD_OPTIONS = [
@@ -352,7 +371,21 @@ function RankingFullSkeleton({ showSummary }: { showSummary: boolean }) {
   );
 }
 
-export default function RankingView({ token, role, refreshKey = 0 }: RankingViewProps) {
+export default function RankingView({
+  token,
+  role,
+  refreshKey = 0,
+  liveMembers = [],
+  myTimer = null,
+  myElapsedSec = 0,
+  liveBusy = false,
+  theme = 'light',
+  onToggleTheme,
+  onStartLive,
+  onPauseLive,
+  onResumeLive,
+  onFinishLive,
+}: RankingViewProps) {
   const [period, setPeriod] = useState<RankingPeriod>('this-week');
   const [detailWeekStart, setDetailWeekStart] = useState<string>('');
   const [metric, setMetric] = useState<CompareMetric>('points');
@@ -382,6 +415,7 @@ export default function RankingView({ token, role, refreshKey = 0 }: RankingView
   const [error, setError] = useState('');
   const [copiedInvite, setCopiedInvite] = useState(false);
   const [showRules, setShowRules] = useState(false);
+  const [fullscreenOpen, setFullscreenOpen] = useState(false);
   const [rankDelta, setRankDelta] = useState<number>(0);
   const prevRankRef = useRef<{ key: string; rank: number } | null>(null);
 
@@ -450,12 +484,51 @@ export default function RankingView({ token, role, refreshKey = 0 }: RankingView
     };
   }, [token, refreshKey, queryString, cacheKey]);
 
+  const todayStr = todayJstStr();
+  const isDetailView = Boolean(detailWeekStart);
+  const isLiveEligible =
+    !isDetailView &&
+    (period === 'this-week' ||
+      period === 'this-month' ||
+      period === 'last-30' ||
+      period === 'all' ||
+      (period === 'custom' && customEnd >= todayStr));
+
+  const liveByStudentId = useMemo(() => {
+    const map = new Map<string, LiveMemberComputed>();
+    if (!isLiveEligible) return map;
+    for (const m of liveMembers) {
+      map.set(m.studentId, m);
+    }
+    return map;
+  }, [liveMembers, isLiveEligible]);
+
+  const activeRunningCount = useMemo(() => {
+    if (!isLiveEligible) return 0;
+    return liveMembers.filter((m) => m.status === 'running').length;
+  }, [liveMembers, isLiveEligible]);
+
   const standings = useMemo(() => {
     if (!currentData) return [];
-    return computeStandings(currentData.members, metric);
-  }, [currentData, metric]);
+    const mergedMembers = isLiveEligible
+      ? currentData.members.map((m) => {
+          const live = liveByStudentId.get(m.studentId);
+          if (!live || live.liveFlooredMinutes <= 0) return m;
+          return {
+            ...m,
+            weekMinutes: m.weekMinutes + live.liveFlooredMinutes,
+            weekPoints: m.weekPoints + live.liveFlooredMinutes,
+          };
+        })
+      : currentData.members;
+    return computeStandings(mergedMembers, metric);
+  }, [currentData, metric, isLiveEligible, liveByStudentId]);
 
   const myStanding = useMemo(() => standings.find((m) => m.isMe) ?? null, [standings]);
+  const myLive = useMemo(
+    () => (myStanding ? liveByStudentId.get(myStanding.studentId) ?? null : null),
+    [myStanding, liveByStudentId]
+  );
 
   // 同一期間内での順位変動フィードバック
   useEffect(() => {
@@ -528,7 +601,6 @@ export default function RankingView({ token, role, refreshKey = 0 }: RankingView
   }
 
   const { group, targetWeekStart, currentWeekStart, recentWeeks = [] } = displayData;
-  const isDetailView = Boolean(detailWeekStart);
   const isStudent = role === '生徒';
   const hasAnyScore = standings.some((m) => m.hasScore);
   const topVal = standings[0]?.metricValue ?? 0;
@@ -612,8 +684,6 @@ export default function RankingView({ token, role, refreshKey = 0 }: RankingView
     ? recentWeeks
     : recentWeeks.slice(0, INITIAL_HISTORY_COUNT);
 
-  const todayStr = todayJstStr();
-
   return (
     <div className="space-y-5 sm:space-y-6">
       {/* 過去週の詳細ビュー用ナビゲーションバー */}
@@ -657,86 +727,46 @@ export default function RankingView({ token, role, refreshKey = 0 }: RankingView
         </div>
       )}
 
-      {/* ヘッダー：タイトル・期間コントロール・比較軸・操作（1つのまとまりに整理） */}
+      {/* ヘッダー：1段目=情報（タイトル・期間・ライブ状況）＋ツール / 2段目=絞り込み操作 */}
       <div className="space-y-3">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex flex-wrap items-baseline gap-2.5">
-            <h2 className="text-lg sm:text-xl font-extrabold text-ink tracking-tight m-0">
-              {group.name}
-            </h2>
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+              <h2 className="text-lg sm:text-xl font-extrabold text-ink tracking-tight m-0 truncate">
+                {group.name}
+              </h2>
+              {activeRunningCount > 0 && (
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-reward-soft text-reward-ink text-xs font-bold">
+                  <span className="relative flex size-2" aria-hidden="true">
+                    <span className="live-ping absolute inline-flex h-full w-full rounded-full bg-reward opacity-75" />
+                    <span className="relative inline-flex rounded-full size-2 bg-reward" />
+                  </span>
+                  <span>{activeRunningCount}人が勉強中</span>
+                </span>
+              )}
+            </div>
             {/* custom 時は下の期間指定バーと重複させない */}
             {(isDetailView || period !== 'custom') && (
               isPeriodLoading && !isDetailView && period !== 'all' ? (
                 <span
                   aria-label="期間を読み込み中"
-                  className="inline-block h-4 w-24 rounded-md bg-card-subtle animate-pulse align-middle"
+                  className="mt-1 block h-4 w-24 rounded-md bg-card-subtle animate-pulse"
                 />
               ) : (
-                <span className="text-xs sm:text-sm font-semibold text-muted font-numbers tabular-nums">
+                <p className="m-0 mt-0.5 text-xs sm:text-sm font-semibold text-muted font-numbers tabular-nums">
                   {periodRangeText}
-                </span>
+                </p>
               )
             )}
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
-            {/* 期間選択（GlideSelect） */}
-            {!isDetailView && (
-              <GlideSelect
-                ariaLabel="比較期間を選択"
-                value={period}
-                onChange={(val) => {
-                  setPeriod(val as RankingPeriod);
-                  setRankDelta(0);
-                }}
-                size="sm"
-                radius={10}
-                menuWidth={156}
-                surfaceColor="var(--card)"
-                highlightColor="var(--card-subtle)"
-                textColor="var(--text)"
-                accentColor="var(--primary)"
-                options={PERIOD_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
-              />
-            )}
-
-            {/* 比較軸トグル（ポイント / 勉強時間） */}
-            <div className="inline-flex items-center p-0.5 rounded-xl bg-card-subtle text-xs font-bold">
-              <button
-                type="button"
-                onClick={() => {
-                  setMetric('points');
-                  setRankDelta(0);
-                }}
-                className={`px-3 py-1.5 rounded-lg transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-primary ${
-                  metric === 'points'
-                    ? 'bg-primary text-white shadow-subtle'
-                    : 'text-muted hover:text-ink'
-                }`}
-              >
-                ポイント
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setMetric('minutes');
-                  setRankDelta(0);
-                }}
-                className={`px-3 py-1.5 rounded-lg transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-primary ${
-                  metric === 'minutes'
-                    ? 'bg-primary text-white shadow-subtle'
-                    : 'text-muted hover:text-ink'
-                }`}
-              >
-                勉強時間
-              </button>
-            </div>
-
+          {/* ツール群（アイコンで静かにまとめる） */}
+          <div className="flex items-center gap-0.5 shrink-0">
             {role === '先生' && group.inviteCode && (
               <button
                 type="button"
                 onClick={() => copyInviteCode(group.inviteCode!)}
-                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold rounded-xl bg-card-subtle/70 hover:bg-card-subtle text-ink transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-primary"
+                className="inline-flex items-center gap-1.5 mr-1 px-2.5 py-1.5 text-xs font-semibold rounded-xl bg-card-subtle/70 hover:bg-card-subtle text-ink transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-primary"
                 title="招待コードをコピー"
               >
                 {copiedInvite ? (
@@ -756,7 +786,7 @@ export default function RankingView({ token, role, refreshKey = 0 }: RankingView
             <button
               type="button"
               onClick={() => setShowRules((v) => !v)}
-              className={`p-2 rounded-xl transition-colors cursor-pointer active:scale-95 focus-visible:outline-2 focus-visible:outline-primary ${
+              className={`grid size-9 place-items-center rounded-xl transition-colors cursor-pointer active:scale-95 focus-visible:outline-2 focus-visible:outline-primary ${
                 showRules
                   ? 'bg-primary-soft text-primary-ink'
                   : 'text-muted hover:text-ink hover:bg-card-subtle'
@@ -765,18 +795,81 @@ export default function RankingView({ token, role, refreshKey = 0 }: RankingView
               aria-label="ポイントルール"
               aria-expanded={showRules}
             >
-              <Info size={15} />
+              <Info size={16} />
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setFullscreenOpen(true)}
+              className="grid size-9 place-items-center rounded-xl text-muted hover:text-ink hover:bg-card-subtle transition-colors cursor-pointer active:scale-95 focus-visible:outline-2 focus-visible:outline-primary"
+              title="全画面で表示（勉強中モード）"
+              aria-label="全画面表示"
+            >
+              <Maximize2 size={16} />
             </button>
 
             <button
               type="button"
               onClick={() => void fetchRanking()}
-              className="p-2 rounded-xl text-muted hover:text-ink hover:bg-card-subtle transition-colors cursor-pointer active:scale-95 focus-visible:outline-2 focus-visible:outline-primary"
+              className="grid size-9 place-items-center rounded-xl text-muted hover:text-ink hover:bg-card-subtle transition-colors cursor-pointer active:scale-95 focus-visible:outline-2 focus-visible:outline-primary"
               title="最新の状態に更新"
               aria-label="更新"
             >
-              <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />
+              <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
             </button>
+          </div>
+        </div>
+
+        {/* 2段目：期間・比較軸 */}
+        <div className="flex flex-wrap items-center gap-2">
+          {!isDetailView && (
+            <GlideSelect
+              ariaLabel="比較期間を選択"
+              value={period}
+              onChange={(val) => {
+                setPeriod(val as RankingPeriod);
+                setRankDelta(0);
+              }}
+              size="sm"
+              radius={10}
+              menuWidth={156}
+              surfaceColor="var(--card)"
+              highlightColor="var(--card-subtle)"
+              textColor="var(--text)"
+              accentColor="var(--primary)"
+              options={PERIOD_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
+            />
+          )}
+
+          <div
+            role="radiogroup"
+            aria-label="比較する指標"
+            className="inline-flex items-center p-0.5 rounded-xl bg-card-subtle text-xs font-bold"
+          >
+            {(
+              [
+                { value: 'points', label: 'ポイント' },
+                { value: 'minutes', label: '勉強時間' },
+              ] as const
+            ).map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                role="radio"
+                aria-checked={metric === opt.value}
+                onClick={() => {
+                  setMetric(opt.value);
+                  setRankDelta(0);
+                }}
+                className={`px-3 py-1.5 rounded-lg transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-primary ${
+                  metric === opt.value
+                    ? 'bg-card text-ink shadow-subtle'
+                    : 'text-muted hover:text-ink'
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
           </div>
         </div>
 
@@ -885,9 +978,10 @@ export default function RankingView({ token, role, refreshKey = 0 }: RankingView
               </div>
             </div>
 
-            {/* 3. 1位との差（独立した明確な指標） */}
+            {/* 3. 1位との差（独立した明確な指標）＋ 勉強中は次の周回ターゲットも補助表示 */}
             {(() => {
               const gap = getGapInfo(myStanding);
+              const myLap = myLive ? getLapProgress(myLive.liveElapsedSec) : null;
               return (
                 <div className="sm:border-l sm:border-line/50 sm:pl-6">
                   <span className="block text-xs font-semibold text-muted mb-1.5">
@@ -906,6 +1000,11 @@ export default function RankingView({ token, role, refreshKey = 0 }: RankingView
                       {gap.value}
                     </span>
                   </div>
+                  {myLap && myLive?.status === 'running' && (
+                    <span className="mt-1.5 inline-flex items-center gap-1 text-[11px] font-bold font-numbers tabular-nums text-reward-ink">
+                      <span>LAP {myLap.lapNumber} クリアまであと {formatTimerClock(myLap.remainingSecInLap)}</span>
+                    </span>
+                  )}
                 </div>
               );
             })()}
@@ -961,6 +1060,87 @@ export default function RankingView({ token, role, refreshKey = 0 }: RankingView
         </section>
       ) : null}
 
+      {/* フォーカスバー：勉強の開始・全画面表示をここに集約（生徒・ライブ対象期間のみ） */}
+      {isStudent && isLiveEligible && (
+        <section
+          aria-label="勉強タイマー"
+          className={`flex flex-wrap items-center justify-between gap-3 rounded-2xl px-4 sm:px-5 py-3 ${
+            myTimer
+              ? myTimer.status === 'running'
+                ? 'bg-reward-soft/60'
+                : 'bg-amber-500/10'
+              : 'bg-card shadow-card'
+          }`}
+        >
+          {myTimer ? (
+            (() => {
+              const lap = getLapProgress(myElapsedSec);
+              const running = myTimer.status === 'running';
+              return (
+                <div className="flex items-center gap-3 min-w-0">
+                  <span className="relative flex size-2.5 shrink-0" aria-hidden="true">
+                    {running && (
+                      <span className="live-ping absolute inline-flex h-full w-full rounded-full bg-reward opacity-75" />
+                    )}
+                    <span
+                      className={`relative inline-flex rounded-full size-2.5 ${running ? 'bg-reward' : 'bg-amber-500'}`}
+                    />
+                  </span>
+                  <div className="min-w-0">
+                    <p className="m-0 flex items-baseline gap-2 font-numbers tabular-nums">
+                      <span className="text-xl font-extrabold tracking-tight text-ink leading-none">
+                        {formatTimerClock(myElapsedSec)}
+                      </span>
+                      <span
+                        className={`text-xs font-bold ${
+                          running ? 'text-reward-ink' : 'text-amber-700 dark:text-amber-300'
+                        }`}
+                      >
+                        {running ? '勉強中' : '一時停止中'}
+                      </span>
+                    </p>
+                    <p className="m-0 mt-0.5 text-[11px] font-semibold text-muted font-numbers tabular-nums truncate">
+                      LAP {lap.lapNumber} · 次の周回まであと {formatTimerClock(lap.remainingSecInLap)}
+                    </p>
+                  </div>
+                </div>
+              );
+            })()
+          ) : (
+            <div className="min-w-0">
+              <p className="m-0 text-sm font-bold text-ink">
+                {activeRunningCount > 0 ? 'いっしょに勉強しよう' : 'タイマーで勉強を記録しよう'}
+              </p>
+              <p className="m-0 mt-0.5 text-xs text-muted">
+                計測中はレースにリアルタイムで反映されます
+              </p>
+            </div>
+          )}
+
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => setFullscreenOpen(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-card/80 hover:bg-card text-xs font-bold text-ink border border-line/70 transition-colors cursor-pointer active:scale-95"
+            >
+              <Maximize2 size={13} />
+              <span>全画面で表示</span>
+            </button>
+            {!myTimer && onStartLive && (
+              <button
+                type="button"
+                disabled={liveBusy}
+                onClick={onStartLive}
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-reward hover:opacity-90 !text-white text-xs font-bold active:scale-95 transition-all shadow-subtle cursor-pointer disabled:opacity-50"
+              >
+                <Play size={13} className="fill-current !text-white" />
+                <span className="!text-white">勉強スタート</span>
+              </button>
+            )}
+          </div>
+        </section>
+      )}
+
       {/* メイン主役：レーストラック */}
       {error && !currentData ? (
         <div className="rounded-2xl bg-card p-8 text-center shadow-card">
@@ -985,12 +1165,11 @@ export default function RankingView({ token, role, refreshKey = 0 }: RankingView
           aria-label="クラスレース進行トラック"
           className={`rounded-2xl bg-card shadow-card overflow-hidden transition-opacity ${isRefreshing ? 'opacity-65' : ''}`}
         >
-          {/* トラック目盛りヘッダー（START・50%・GOAL/表示上限を明確に表示） */}
-          <div className="grid grid-cols-1 sm:grid-cols-[172px_1fr_156px] items-center bg-[#E5ECF4] dark:bg-card-subtle/60 px-4 sm:px-6 py-3 text-xs font-semibold text-muted font-numbers tabular-nums">
+          {/* トラック目盛りヘッダー（START・GOAL/表示上限のみに絞って視線を集中） */}
+          <div className="grid grid-cols-1 sm:grid-cols-[172px_1fr_156px] items-center bg-card-subtle/60 px-4 sm:px-6 py-2.5 text-xs font-semibold text-muted font-numbers tabular-nums">
             <span className="hidden sm:block">メンバー</span>
             <div className="flex items-center justify-between px-4 sm:px-5">
               <span className="font-bold text-ink">START</span>
-              <span>50%（{formatMetric(Math.round(scaleValue * 0.5))}）</span>
               <span className="inline-flex items-center gap-1 font-bold text-ink">
                 <Flag size={12} className={isGoalExceeded ? 'text-amber-500' : 'text-primary'} />
                 <span>
@@ -1000,7 +1179,7 @@ export default function RankingView({ token, role, refreshKey = 0 }: RankingView
                 </span>
               </span>
             </div>
-            <span className="hidden sm:block text-right">スコア / 進捗</span>
+            <span className="hidden sm:block text-right">スコア</span>
           </div>
 
           {/* 各プレイヤーのレーン */}
@@ -1011,6 +1190,9 @@ export default function RankingView({ token, role, refreshKey = 0 }: RankingView
               const reachedGoal = member.hasScore && member.metricValue >= goalValue;
               const isFirst = member.computedRank === 1 && member.hasScore;
               const laneGap = getLaneGapText(member, index);
+              const liveMember = liveByStudentId.get(member.studentId) ?? null;
+              const isLiveRunning = liveMember?.status === 'running';
+              const lapInfo = liveMember ? getLapProgress(liveMember.liveElapsedSec) : null;
 
               // 統一カラーシステム: ブルー=自分 / グリーン=相手（1位はゴールドアクセント）
               const barColor = member.isMe ? 'var(--primary)' : 'var(--reward)';
@@ -1018,10 +1200,12 @@ export default function RankingView({ token, role, refreshKey = 0 }: RankingView
               return (
                 <div
                   key={member.studentId}
-                  className={`relative grid grid-cols-1 sm:grid-cols-[172px_1fr_156px] items-center gap-3 sm:gap-5 px-4 sm:px-6 py-4 sm:py-5 transition-colors ${
+                  className={`relative px-4 sm:px-6 py-4 sm:py-5 transition-colors ${
                     member.isMe
                       ? 'bg-primary-soft/20'
-                      : 'hover:bg-card-subtle/35'
+                      : isLiveRunning
+                        ? 'bg-reward-soft/25'
+                        : 'hover:bg-card-subtle/35'
                   }`}
                 >
                   {/* 自分のレーン左端アクセント（ブルー） */}
@@ -1032,161 +1216,249 @@ export default function RankingView({ token, role, refreshKey = 0 }: RankingView
                     />
                   )}
 
-                  {/* 1列目：順位・メンバー名 */}
-                  <div className="flex items-center justify-between gap-2 min-w-0">
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <span
-                        className={`inline-flex items-center gap-1 min-w-[48px] text-xs sm:text-sm font-extrabold font-numbers tabular-nums shrink-0 ${
-                          isFirst ? 'text-amber-500 dark:text-amber-400' : 'text-muted'
-                        }`}
-                      >
-                        {isFirst && <Crown size={15} className="shrink-0" aria-hidden="true" />}
-                        <span>{formatRankText(member.computedRank, member.isTied, hasAnyScore)}</span>
-                      </span>
+                  <div className="grid grid-cols-1 sm:grid-cols-[172px_1fr_156px] items-center gap-3 sm:gap-5">
+                    {/* 1列目：順位・メンバー名・勉強中バッジ */}
+                    <div className="flex items-center justify-between gap-2 min-w-0">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <span
+                            className={`inline-flex items-center gap-1 min-w-[48px] text-xs sm:text-sm font-extrabold font-numbers tabular-nums shrink-0 ${
+                              isFirst ? 'text-amber-500 dark:text-amber-400' : 'text-muted'
+                            }`}
+                          >
+                            {isFirst && <Crown size={15} className="shrink-0" aria-hidden="true" />}
+                            <span>{formatRankText(member.computedRank, member.isTied, hasAnyScore)}</span>
+                          </span>
 
-                      <span className="font-bold text-sm sm:text-[15px] text-ink truncate">
-                        {member.displayName}
-                      </span>
+                          <span className="font-bold text-sm sm:text-[15px] text-ink truncate">
+                            {member.displayName}
+                          </span>
 
-                      {member.isMe && (
-                        <span className="px-1.5 py-0.5 rounded-md bg-primary-soft text-primary-ink text-[10px] font-bold shrink-0">
-                          あなた
-                        </span>
-                      )}
-                    </div>
-
-                    {/* モバイル用スコア・進捗率 */}
-                    <div className="flex sm:hidden items-baseline gap-1.5 font-numbers tabular-nums shrink-0">
-                      <span className={`text-base font-extrabold ${member.isMe ? 'text-primary' : 'text-ink'}`}>
-                        {formatMetric(member.metricValue)}
-                      </span>
-                      <span className="text-xs font-semibold text-muted">
-                        {progressPct}%
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* 2列目：ワイドレーストラック＋進行バー＋アバター */}
-                  <div className="relative h-12 flex items-center px-4 sm:px-5">
-                    {/* START / 50% / GOAL ガイドライン */}
-                    <div className="absolute inset-y-1 left-4 right-4 sm:left-5 sm:right-5 pointer-events-none">
-                      {/* START ライン */}
-                      <div className="absolute inset-y-0 left-0 border-l-2 border-line-strong/80" />
-                      {/* 50% ライン */}
-                      <div className="absolute inset-y-0 left-1/2 border-l border-dashed border-line-strong/60" />
-                      {/* 目標超過時の目標ライン（goalValue < scaleValue のとき） */}
-                      {isGoalExceeded && (
-                        <div
-                          className="absolute inset-y-0 border-l border-dashed border-amber-500/60"
-                          style={{ left: `${Math.round((goalValue / scaleValue) * 100)}%` }}
-                          title={`目標 ${formatMetric(goalValue)}`}
-                        />
-                      )}
-                      {/* GOAL / 上限ライン */}
-                      <div
-                        className={`absolute inset-y-0 right-0 border-l-2 ${
-                          reachedGoal ? 'border-amber-500/80' : 'border-line-strong/80'
-                        }`}
-                      />
-                    </div>
-
-                    {/* 落ち着いたダークトラックレール + 明確なソリッド進行ライン */}
-                    <div className="relative w-full h-2.5 rounded-full bg-card-subtle">
-                      <motion.div
-                        initial={{ width: 0 }}
-                        animate={{ width: `${progressPct}%` }}
-                        transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1] }}
-                        className="absolute inset-y-0 left-0 rounded-full"
-                        style={{ backgroundColor: barColor }}
-                      />
-
-                      {/* 進行位置のプレイヤーアバター */}
-                      <motion.div
-                        initial={{ left: '0%' }}
-                        animate={{ left: `${progressPct}%` }}
-                        transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1] }}
-                        className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 z-10"
-                      >
-                        <div className="relative">
-                          {isFirst && (
-                            <span
-                              className="absolute -top-3.5 left-1/2 -translate-x-1/2 text-amber-500"
-                              aria-hidden="true"
-                            >
-                              <Crown size={12} className="fill-amber-500/20" />
-                            </span>
-                          )}
-                          <StudentAvatar
-                            avatarUrl={member.avatarUrl}
-                            icon={member.icon}
-                            color={member.isMe ? '#3B82F6' : member.color}
-                            name={member.displayName}
-                            size="md"
-                            shape="circle"
-                            className={`!ring-2 ${
-                              member.isMe
-                                ? '!ring-primary'
-                                : isFirst
-                                  ? '!ring-amber-500'
-                                  : '!ring-reward/70'
-                            } shadow-card`}
-                          />
-                          {reachedGoal && (
-                            <span
-                              className="absolute -bottom-0.5 -right-0.5 size-4 rounded-full bg-amber-500 text-white grid place-items-center ring-2 ring-card"
-                              title={`目標 ${formatMetric(goalValue)} 達成`}
-                            >
-                              <Check size={9} strokeWidth={3} />
+                          {member.isMe && (
+                            <span className="px-1.5 py-0.5 rounded-md bg-primary-soft text-primary-ink text-[10px] font-bold shrink-0">
+                              あなた
                             </span>
                           )}
                         </div>
-                      </motion.div>
+
+                        {liveMember && (
+                          <div className="mt-1 ml-[58px] flex items-center gap-1.5 min-w-0">
+                            {isLiveRunning ? (
+                              <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-reward-soft text-reward-ink text-[11px] font-bold font-numbers tabular-nums">
+                                <span className="relative flex size-1.5 shrink-0" aria-hidden="true">
+                                  <span className="live-ping absolute inline-flex h-full w-full rounded-full bg-reward opacity-75" />
+                                  <span className="relative inline-flex rounded-full size-1.5 bg-reward" />
+                                </span>
+                                <span>勉強中 {formatTimerClock(liveMember.liveElapsedSec)}</span>
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-700 dark:text-amber-300 text-[11px] font-bold font-numbers tabular-nums">
+                                <span>一時停止 {formatTimerClock(liveMember.liveElapsedSec)}</span>
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* モバイル用スコア・進捗率 */}
+                      <div className="flex sm:hidden items-baseline gap-1.5 font-numbers tabular-nums shrink-0">
+                        <span className={`text-base font-extrabold ${member.isMe ? 'text-primary' : 'text-ink'}`}>
+                          {formatMetric(member.metricValue)}
+                        </span>
+                        <span className="text-xs font-semibold text-muted">
+                          {progressPct}%
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* 2列目：ワイドレーストラック＋進行バー＋アバター */}
+                    <div className="relative h-12 flex items-center px-4 sm:px-5">
+                      {/* START / 50% / GOAL ガイドライン */}
+                      <div className="absolute inset-y-1 left-4 right-4 sm:left-5 sm:right-5 pointer-events-none">
+                        {/* START ライン */}
+                        <div className="absolute inset-y-0 left-0 border-l-2 border-line-strong/80" />
+                        {/* 50% ライン */}
+                        <div className="absolute inset-y-0 left-1/2 border-l border-dashed border-line-strong/60" />
+                        {/* 目標超過時の目標ライン（goalValue < scaleValue のとき） */}
+                        {isGoalExceeded && (
+                          <div
+                            className="absolute inset-y-0 border-l border-dashed border-amber-500/60"
+                            style={{ left: `${Math.round((goalValue / scaleValue) * 100)}%` }}
+                            title={`目標 ${formatMetric(goalValue)}`}
+                          />
+                        )}
+                        {/* GOAL / 上限ライン */}
+                        <div
+                          className={`absolute inset-y-0 right-0 border-l-2 ${
+                            reachedGoal ? 'border-amber-500/80' : 'border-line-strong/80'
+                          }`}
+                        />
+                      </div>
+
+                      {/* 落ち着いたダークトラックレール + 明確なソリッド進行ライン */}
+                      <div className="relative w-full h-2.5 rounded-full bg-card-subtle">
+                        <motion.div
+                          initial={{ width: 0 }}
+                          animate={{ width: `${progressPct}%` }}
+                          transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1] }}
+                          className={`absolute inset-y-0 left-0 rounded-full ${isLiveRunning ? 'live-shimmer' : ''}`}
+                          style={{ backgroundColor: barColor }}
+                        />
+
+                        {/* 進行位置のプレイヤーアバター */}
+                        <motion.div
+                          initial={{ left: '0%' }}
+                          animate={{ left: `${progressPct}%` }}
+                          transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1] }}
+                          className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 z-10"
+                        >
+                          <div className="relative">
+                            {isLiveRunning && (
+                              <span
+                                className="live-ping absolute -inset-1 rounded-full border-2 border-reward/70 pointer-events-none"
+                                aria-hidden="true"
+                              />
+                            )}
+                            {isFirst && (
+                              <span
+                                className="absolute -top-3.5 left-1/2 -translate-x-1/2 text-amber-500"
+                                aria-hidden="true"
+                              >
+                                <Crown size={12} className="fill-amber-500/20" />
+                              </span>
+                            )}
+                            <StudentAvatar
+                              avatarUrl={member.avatarUrl}
+                              icon={member.icon}
+                              color={member.isMe ? '#3B82F6' : member.color}
+                              name={member.displayName}
+                              size="md"
+                              shape="circle"
+                              className={`!ring-2 ${
+                                isLiveRunning
+                                  ? '!ring-reward'
+                                  : member.isMe
+                                    ? '!ring-primary'
+                                    : isFirst
+                                      ? '!ring-amber-500'
+                                      : '!ring-reward/70'
+                              } shadow-card`}
+                            />
+                            {reachedGoal && (
+                              <span
+                                className="absolute -bottom-0.5 -right-0.5 size-4 rounded-full bg-amber-500 text-white grid place-items-center ring-2 ring-card"
+                                title={`目標 ${formatMetric(goalValue)} 達成`}
+                              >
+                                <Check size={9} strokeWidth={3} />
+                              </span>
+                            )}
+                          </div>
+                        </motion.div>
+                      </div>
+                    </div>
+
+                    {/* 3列目：スコア・進捗率・相手との差 */}
+                    <div className="flex sm:flex-col sm:items-end justify-between gap-1 font-numbers tabular-nums">
+                      <div className="hidden sm:flex items-baseline gap-2">
+                        <span className={`text-lg font-extrabold tracking-tight ${member.isMe ? 'text-primary' : 'text-ink'}`}>
+                          {metric === 'minutes' ? (
+                            formatDuration(member.weekMinutes)
+                          ) : (
+                            <>
+                              <CountUp
+                                key={`${cacheKey}-${member.studentId}`}
+                                to={member.weekPoints}
+                                duration={0.5}
+                                trigger="load"
+                              />
+                              <span className="text-xs font-bold text-muted ml-0.5">pt</span>
+                            </>
+                          )}
+                        </span>
+                        <span className="text-xs font-bold text-muted">
+                          {progressPct}%
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-2 text-xs">
+                        {laneGap ? (
+                          <span
+                            className={`font-semibold ${
+                              isFirst && !member.isTied
+                                ? 'text-amber-600 dark:text-amber-400'
+                                : 'text-muted'
+                            }`}
+                          >
+                            {laneGap}
+                          </span>
+                        ) : (
+                          <span className="text-muted">
+                            {metric === 'points'
+                              ? formatDuration(member.weekMinutes)
+                              : `${member.weekPoints}pt`}
+                          </span>
+                        )}
+                      </div>
                     </div>
                   </div>
 
-                  {/* 3列目：スコア・進捗率・相手との差 */}
-                  <div className="flex sm:flex-col sm:items-end justify-between gap-1 font-numbers tabular-nums">
-                    <div className="hidden sm:flex items-baseline gap-2">
-                      <span className={`text-lg font-extrabold tracking-tight ${member.isMe ? 'text-primary' : 'text-ink'}`}>
-                        {metric === 'minutes' ? (
-                          formatDuration(member.weekMinutes)
-                        ) : (
-                          <>
-                            <CountUp
-                              key={`${cacheKey}-${member.studentId}`}
-                              to={member.weekPoints}
-                              duration={0.5}
-                              trigger="load"
-                            />
-                            <span className="text-xs font-bold text-muted ml-0.5">pt</span>
-                          </>
-                        )}
-                      </span>
-                      <span className="text-xs font-bold text-muted">
-                        {progressPct}%
-                      </span>
-                    </div>
-
-                    <div className="flex items-center gap-2 text-xs">
-                      {laneGap ? (
+                  {/* 勉強中メンバーのみ：30分周回のスリムな1行バー（数時間差でも1分=3.3%ずつ前進） */}
+                  {liveMember && lapInfo && (
+                    <div className="mt-2 grid grid-cols-1 sm:grid-cols-[172px_1fr_156px] items-center gap-1.5 sm:gap-5">
+                      <span className="hidden sm:block" aria-hidden="true" />
+                      <div className="flex items-center gap-2.5 px-4 sm:px-5 text-[11px] font-bold font-numbers tabular-nums">
                         <span
-                          className={`font-semibold ${
-                            isFirst && !member.isTied
-                              ? 'text-amber-600 dark:text-amber-400'
-                              : 'text-muted'
+                          className={`shrink-0 px-1.5 py-0.5 rounded-md ${
+                            member.isMe
+                              ? 'bg-primary-soft text-primary-ink'
+                              : 'bg-reward-soft text-reward-ink'
                           }`}
+                          title="30分で1周"
                         >
-                          {laneGap}
+                          LAP {lapInfo.lapNumber}
+                        </span>
+                        <div className="relative flex-1 h-1.5 rounded-full bg-card-subtle overflow-hidden">
+                          {/* 5分ごとの目盛り */}
+                          {[1, 2, 3, 4, 5].map((tick) => (
+                            <span
+                              key={tick}
+                              className="absolute inset-y-0 w-px bg-card/90 z-10 pointer-events-none"
+                              style={{ left: `${(tick / 6) * 100}%` }}
+                              aria-hidden="true"
+                            />
+                          ))}
+                          <div
+                            className={`h-full rounded-full transition-[width] duration-700 ease-linear ${
+                              isLiveRunning ? 'live-shimmer' : ''
+                            }`}
+                            style={{
+                              width: `${Math.max(2, lapInfo.lapProgressPct)}%`,
+                              backgroundColor: barColor,
+                            }}
+                          />
+                        </div>
+                        <span className="shrink-0 text-muted">
+                          <span className="text-ink">{formatTimerClock(lapInfo.lapElapsedSec)}</span>
+                          <span className="font-semibold"> / 30:00</span>
+                        </span>
+                      </div>
+                      {member.isMe && isLiveRunning ? (
+                        <span className="hidden sm:inline-flex items-center justify-end gap-1.5 text-[10px] font-bold text-primary-ink">
+                          <span>次の+1分</span>
+                          <span className="inline-block w-12 h-1.5 rounded-full bg-card-subtle overflow-hidden">
+                            <span
+                              className="block h-full bg-primary transition-[width] duration-700 ease-linear"
+                              style={{ width: `${lapInfo.minuteProgressPct}%` }}
+                            />
+                          </span>
                         </span>
                       ) : (
-                        <span className="text-muted">
-                          {metric === 'points'
-                            ? formatDuration(member.weekMinutes)
-                            : `${member.weekPoints}pt`}
+                        <span className="hidden sm:block text-right text-[10px] font-semibold text-muted font-numbers">
+                          今回 +{liveMember.liveFlooredMinutes}分
                         </span>
                       )}
                     </div>
-                  </div>
+                  )}
                 </div>
               );
             })}
@@ -1314,6 +1586,29 @@ export default function RankingView({ token, role, refreshKey = 0 }: RankingView
           </div>
         </section>
       )}
+
+      {/* 勉強中の全画面クラスレース表示 */}
+      <RaceFullscreenOverlay
+        open={fullscreenOpen}
+        onClose={() => setFullscreenOpen(false)}
+        groupName={group.name}
+        periodLabel={periodRangeText}
+        metric={metric}
+        scaleValue={scaleValue}
+        goalValue={goalValue}
+        isGoalExceeded={isGoalExceeded}
+        standings={standings}
+        liveByStudentId={liveByStudentId}
+        myTimer={myTimer}
+        myElapsedSec={myElapsedSec}
+        liveBusy={liveBusy}
+        theme={theme}
+        onToggleTheme={onToggleTheme}
+        onStartLive={onStartLive}
+        onPauseLive={onPauseLive}
+        onResumeLive={onResumeLive}
+        onFinishLive={onFinishLive}
+      />
 
       {/* 招待コードで参加モーダル */}
       {showJoinModal && (

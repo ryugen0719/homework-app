@@ -3,7 +3,103 @@ import { getFirestore } from 'firebase-admin/firestore';
 import crypto from 'node:crypto';
 
 export type AppRole = 'teacher' | 'student';
-export type StudySession = { id: string; content: string; minutes?: number; evidencePath?: string; createdAt?: string; updatedAt?: string };
+export type StudySession = {
+  id: string;
+  content: string;
+  minutes?: number;
+  evidencePath?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  source?: 'manual' | 'live';
+  startedAt?: string;
+  endedAt?: string;
+};
+
+export type LiveTimerStatus = 'running' | 'paused';
+
+export type LiveTimerDoc = {
+  status: LiveTimerStatus;
+  startedAt: string;
+  resumedAt: string | null;
+  accumulatedSec: number;
+  lastHeartbeatAt: string;
+  updatedAt: string;
+};
+
+export const LIVE_HEARTBEAT_TIMEOUT_SEC = 15 * 60;
+export const LIVE_HEARTBEAT_GRACE_SEC = 60;
+export const LIVE_MAX_SESSION_SEC = 4 * 60 * 60;
+
+export function computeLiveTimerState(doc: LiveTimerDoc, nowMs: number) {
+  const baseAccumulated = Math.max(0, Math.floor(Number(doc.accumulatedSec) || 0));
+
+  if (doc.status !== 'running' || !doc.resumedAt) {
+    const clamped = Math.min(LIVE_MAX_SESSION_SEC, baseAccumulated);
+    return {
+      status: 'paused' as LiveTimerStatus,
+      elapsedSec: clamped,
+      accumulatedSec: clamped,
+      startedAt: doc.startedAt,
+      resumedAt: null as string | null,
+      lastHeartbeatAt: doc.lastHeartbeatAt,
+      isStale: false,
+      isCapped: clamped >= LIVE_MAX_SESSION_SEC,
+    };
+  }
+
+  const resumedMs = Date.parse(doc.resumedAt);
+  const heartbeatMs = Date.parse(doc.lastHeartbeatAt || doc.resumedAt || doc.startedAt);
+  if (Number.isNaN(resumedMs)) {
+    const clamped = Math.min(LIVE_MAX_SESSION_SEC, baseAccumulated);
+    return {
+      status: 'paused' as LiveTimerStatus,
+      elapsedSec: clamped,
+      accumulatedSec: clamped,
+      startedAt: doc.startedAt,
+      resumedAt: null as string | null,
+      lastHeartbeatAt: doc.lastHeartbeatAt,
+      isStale: true,
+      isCapped: clamped >= LIVE_MAX_SESSION_SEC,
+    };
+  }
+
+  const isStale =
+    !Number.isNaN(heartbeatMs) &&
+    nowMs - heartbeatMs > LIVE_HEARTBEAT_TIMEOUT_SEC * 1000;
+
+  const effectiveEndMs = isStale
+    ? Math.min(nowMs, heartbeatMs + LIVE_HEARTBEAT_GRACE_SEC * 1000)
+    : nowMs;
+
+  const deltaSec = Math.max(0, Math.floor((effectiveEndMs - resumedMs) / 1000));
+  const rawTotal = baseAccumulated + deltaSec;
+  const isCapped = rawTotal >= LIVE_MAX_SESSION_SEC;
+  const elapsedSec = Math.min(LIVE_MAX_SESSION_SEC, rawTotal);
+
+  if (isStale || isCapped) {
+    return {
+      status: 'paused' as LiveTimerStatus,
+      elapsedSec,
+      accumulatedSec: elapsedSec,
+      startedAt: doc.startedAt,
+      resumedAt: null as string | null,
+      lastHeartbeatAt: doc.lastHeartbeatAt,
+      isStale,
+      isCapped,
+    };
+  }
+
+  return {
+    status: 'running' as LiveTimerStatus,
+    elapsedSec,
+    accumulatedSec: baseAccumulated,
+    startedAt: doc.startedAt,
+    resumedAt: doc.resumedAt,
+    lastHeartbeatAt: doc.lastHeartbeatAt,
+    isStale: false,
+    isCapped: false,
+  };
+}
 
 export type Student = {
   id: string;
@@ -157,6 +253,9 @@ export function sessionsFromDay(day: Record<string, unknown>): StudySession[] {
       ...(typeof session.evidencePath === 'string' ? { evidencePath: session.evidencePath } : {}),
       ...(typeof session.createdAt === 'string' ? { createdAt: session.createdAt } : {}),
       ...(typeof session.updatedAt === 'string' ? { updatedAt: session.updatedAt } : {}),
+      ...(session.source === 'manual' || session.source === 'live' ? { source: session.source } : {}),
+      ...(typeof session.startedAt === 'string' ? { startedAt: session.startedAt } : {}),
+      ...(typeof session.endedAt === 'string' ? { endedAt: session.endedAt } : {}),
     }];
   });
 }

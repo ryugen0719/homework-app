@@ -214,6 +214,10 @@ export async function PUT(request: Request) {
       const content = value.content.trim();
       const date = value.date as string;
       const minutes = value.minutes as number | undefined;
+      const source = value.source === 'live' || value.source === 'manual' ? value.source : undefined;
+      const startedAt = typeof value.startedAt === 'string' ? value.startedAt : undefined;
+      const endedAt = typeof value.endedAt === 'string' ? value.endedAt : undefined;
+      const clearLiveTimer = Boolean(value.clearLiveTimer);
       const now = new Date().toISOString();
 
       await db.runTransaction(async (transaction) => {
@@ -231,11 +235,17 @@ export async function PUT(request: Request) {
           content,
           ...(minutes === undefined ? {} : { minutes }),
           ...(old?.evidencePath ? { evidencePath: old.evidencePath } : {}),
+          ...(source ? { source } : old?.source ? { source: old.source } : {}),
+          ...(startedAt ? { startedAt } : old?.startedAt ? { startedAt: old.startedAt } : {}),
+          ...(endedAt ? { endedAt } : old?.endedAt ? { endedAt: old.endedAt } : {}),
           createdAt: old?.createdAt || now,
           updatedAt: now,
         };
         const updated = old ? sessions.map((session) => session.id === next.id ? next : session) : [...sessions, next];
         transaction.set(dayRef, { date, sessions: updated, updatedAt: now }, { merge: true });
+        if (clearLiveTimer) {
+          transaction.delete(studentRef.collection('liveTimer').doc('current'));
+        }
       });
       return NextResponse.json({ ok: true }, { headers: { 'Cache-Control': 'no-store' } });
     }
