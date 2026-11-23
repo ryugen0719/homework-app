@@ -9,6 +9,7 @@ import {
   getStudentsForTeacher,
   hashPassword,
   MAX_STUDENTS_PER_TEACHER,
+  verifyPassword,
   type Student,
 } from '../../../lib/homework-server';
 
@@ -139,6 +140,7 @@ export async function PUT(request: Request) {
       color?: unknown;
       icon?: unknown;
       avatarUrl?: unknown;
+      currentPassword?: unknown;
       password?: unknown;
       status?: unknown;
       rankingOptOut?: unknown;
@@ -174,7 +176,7 @@ export async function PUT(request: Request) {
       if (typeof body.rankingOptOut === 'boolean') updates.rankingOptOut = body.rankingOptOut;
       if (body.regenerateToken === true) updates.token = crypto.randomBytes(32).toString('base64url');
     } else {
-      // 生徒本人の場合: 自分の表示名・色・アイコン・アバター画像・オプトアウトを変更可能
+      // 生徒本人の場合: 自分の表示名・色・アイコン・アバター画像・オプトアウト・パスワードを変更可能
       if (targetStudentId !== auth.studentId) {
         return respond('他の生徒の情報は変更できません', 403);
       }
@@ -183,6 +185,34 @@ export async function PUT(request: Request) {
       if (typeof body.icon === 'string' && body.icon.trim()) updates.icon = body.icon.trim();
       if (typeof body.avatarUrl === 'string') updates.avatarUrl = body.avatarUrl.trim();
       if (typeof body.rankingOptOut === 'boolean') updates.rankingOptOut = body.rankingOptOut;
+
+      if (typeof body.password === 'string' && body.password.trim()) {
+        const nextPlain = body.password.trim();
+        if (nextPlain.length < 4 || nextPlain.length > 20) {
+          return respond('パスワードは4〜20文字で入力してください', 400);
+        }
+        const currentPw = typeof body.currentPassword === 'string' ? body.currentPassword.trim() : '';
+        if (!currentPw) {
+          return respond('現在のパスワードを入力してください', 400);
+        }
+
+        let currentOk = false;
+        if (data.passwordHash && data.passwordSalt) {
+          currentOk = verifyPassword(currentPw, data.passwordHash, data.passwordSalt);
+        } else if (data.passwordPlain) {
+          currentOk = currentPw === data.passwordPlain;
+        } else {
+          currentOk = currentPw === '1234';
+        }
+        if (!currentOk) {
+          return respond('現在のパスワードが正しくありません', 401);
+        }
+
+        const { hash, salt } = hashPassword(nextPlain);
+        updates.passwordHash = hash;
+        updates.passwordSalt = salt;
+        updates.passwordPlain = nextPlain;
+      }
     }
 
     await studentRef.set(updates, { merge: true });
@@ -208,7 +238,14 @@ export async function PUT(request: Request) {
       // ignore sync error
     }
 
-    return NextResponse.json({ ok: true, updates }, { headers: { 'Cache-Control': 'no-store' } });
+    const safeUpdates = { ...updates };
+    delete safeUpdates.passwordHash;
+    delete safeUpdates.passwordSalt;
+    if (auth.role !== 'teacher') {
+      delete safeUpdates.passwordPlain;
+    }
+
+    return NextResponse.json({ ok: true, updates: safeUpdates }, { headers: { 'Cache-Control': 'no-store' } });
   } catch {
     return respond('生徒情報を更新できませんでした', 503);
   }

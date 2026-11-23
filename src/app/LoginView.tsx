@@ -11,10 +11,10 @@ import {
   Lock,
   User,
 } from 'lucide-react';
-import { FiBookOpen } from 'react-icons/fi';
 import StudentAvatar from '../components/StudentAvatar';
 import RubberSegment from '../components/RubberSegment/RubberSegment';
 import CodeSlots, { type CodeSlotsStatus } from '../components/CodeSlots/CodeSlots';
+import AppTitle from '../components/AppTitle';
 
 interface PublicStudent {
   id: string;
@@ -176,17 +176,10 @@ export default function LoginView({ onLoginSuccess }: LoginViewProps) {
     <div className="min-h-[80vh] flex flex-col items-center justify-center px-4 py-8">
       <div className="w-full max-w-md space-y-6">
         {/* ロゴ＆ウェルカムメッセージ */}
-        <div className="text-center space-y-2">
-          <div className="inline-flex size-14 items-center justify-center rounded-2xl bg-primary text-white shadow-card mb-1">
-            <FiBookOpen size={28} />
-          </div>
-          <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-ink">
-            宿題ノート
-          </h1>
-          <p className="text-xs sm:text-sm text-muted">
-            日々の学びを記録し、先生と一緒に育てる学習ノート
-          </p>
-        </div>
+        <AppTitle
+          variant="hero"
+          subtitle="日々の学びを記録し、先生と一緒に育てる学習ノート"
+        />
 
         {/* ログインカード */}
         <div className="rounded-3xl border border-line bg-card p-6 sm:p-8 shadow-card space-y-6">

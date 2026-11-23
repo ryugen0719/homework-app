@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 export const LIVE_LAP_SECONDS = 30 * 60; // 30分 = 1周
 export const LIVE_MAX_SESSION_SEC = 4 * 60 * 60; // 4時間上限
@@ -77,7 +77,7 @@ export function getLapProgress(totalSec: number) {
   };
 }
 
-function computeInterpolatedSec(
+export function computeInterpolatedSec(
   item: { status: 'running' | 'paused'; elapsedSec: number; accumulatedSec: number; resumedAt: string | null },
   serverNowMs: number
 ): number {
@@ -101,6 +101,8 @@ export function useLiveTimer(token: string, enabled: boolean) {
   const [busy, setBusy] = useState(false);
   const [tickNow, setTickNow] = useState<number>(0);
   const [serverOffsetMs, setServerOffsetMs] = useState<number>(0);
+  // 古いレスポンスが新しい操作結果を上書きしないための単調増加シーケンス
+  const seqRef = useRef<number>(0);
 
   const isActive = enabled && Boolean(token);
   const myTimer = isActive ? myTimerState : null;
@@ -119,17 +121,19 @@ export function useLiveTimer(token: string, enabled: boolean) {
 
   const refresh = useCallback(async () => {
     if (!enabled || !token) return;
+    const reqSeq = ++seqRef.current;
     try {
       const res = await fetch('/api/live', {
         headers: { 'x-app-token': token },
         cache: 'no-store',
       });
-      if (!res.ok) return;
+      if (!res.ok || reqSeq !== seqRef.current) return;
       const data = (await res.json()) as {
         serverNow?: string;
         myTimer?: LiveTimerState | null;
         liveMembers?: LiveMember[];
       };
+      if (reqSeq !== seqRef.current) return;
       syncServerTime(data.serverNow);
       setMyTimer(data.myTimer ?? null);
       setRawMembers(Array.isArray(data.liveMembers) ? data.liveMembers : []);
@@ -210,6 +214,7 @@ export function useLiveTimer(token: string, enabled: boolean) {
   const postAction = useCallback(
     async (action: string) => {
       if (!enabled || !token) return null;
+      const reqSeq = ++seqRef.current;
       setBusy(true);
       try {
         const res = await fetch('/api/live', {
@@ -222,12 +227,14 @@ export function useLiveTimer(token: string, enabled: boolean) {
         });
         if (!res.ok) return null;
         const data = await res.json();
-        syncServerTime(data.serverNow);
-        if ('myTimer' in data) {
-          setMyTimer(data.myTimer ?? null);
+        if (reqSeq === seqRef.current) {
+          syncServerTime(data.serverNow);
+          if ('myTimer' in data) {
+            setMyTimer(data.myTimer ?? null);
+          }
+          setTickNow(Date.now());
+          void refresh();
         }
-        setTickNow(Date.now());
-        void refresh();
         return data;
       } catch {
         return null;
@@ -292,11 +299,24 @@ export function useLiveTimer(token: string, enabled: boolean) {
     [liveMembers]
   );
 
+  // 誰かのライブ状態（開始・一時停止・再開・終了）が変化したことを検知するための署名
+  const liveSignature = useMemo(() => {
+    const myPart = myTimer
+      ? `me:${myTimer.status}:${myTimer.startedAt}:${myTimer.resumedAt || ''}:${myTimer.accumulatedSec}`
+      : 'me:none';
+    const membersPart = rawMembers
+      .map((m) => `${m.studentId}:${m.status}:${m.startedAt}:${m.resumedAt || ''}:${m.accumulatedSec}`)
+      .sort()
+      .join(',');
+    return `${myPart}|${membersPart}`;
+  }, [myTimer, rawMembers]);
+
   return {
     myTimer,
     myElapsedSec,
     liveMembers,
     otherRunningMembers,
+    liveSignature,
     busy,
     start,
     pause,

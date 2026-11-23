@@ -4,8 +4,10 @@ import { FieldPath } from 'firebase-admin/firestore';
 import {
   authenticate,
   calculateWeeklyPoints,
+  computeLiveTimerState,
   database,
   ensureDefaultStudent,
+  LiveTimerDoc,
   MAX_MEMBERS_PER_GROUP,
   offsetDateJst,
   sessionsFromDay,
@@ -266,6 +268,8 @@ export async function GET(request: NextRequest) {
     const historyEndDate = rangeEnd > currentWeekEnd ? rangeEnd : currentWeekEnd;
 
     const activeMembers = members.filter((m) => m.status !== 'suspended');
+    const nowMs = Date.now();
+    const serverNow = new Date(nowMs).toISOString();
 
     const memberHistories = await Promise.all(
       activeMembers.map(async (member) => {
@@ -278,10 +282,11 @@ export async function GET(request: NextRequest) {
                 .where(FieldPath.documentId(), '>=', historyStartDate)
                 .where(FieldPath.documentId(), '<=', historyEndDate);
 
-        // 生徒情報と学習日ドキュメントを同時並列取得
-        const [sDoc, daysSnapshot] = await Promise.all([
+        // 生徒情報・学習日ドキュメント・現在のライブタイマーを同一スナップショットで並列取得
+        const [sDoc, daysSnapshot, timerDoc] = await Promise.all([
           studentRef.get(),
           daysQuery.get(),
+          studentRef.collection('liveTimer').doc('current').get(),
         ]);
 
         const sData = sDoc.exists ? sDoc.data() || {} : {};
@@ -290,6 +295,39 @@ export async function GET(request: NextRequest) {
         // 他の生徒がオプトアウトしている場合はランキングに含めない
         if (isOptedOut && member.studentId !== currentStudentId) {
           return null;
+        }
+
+        const isMe = auth.role === 'student' && member.studentId === auth.studentId;
+        let liveTimer: {
+          status: 'running' | 'paused';
+          elapsedSec: number;
+          accumulatedSec: number;
+          startedAt: string;
+          resumedAt: string | null;
+          isStale: boolean;
+          isCapped: boolean;
+        } | null = null;
+
+        if (timerDoc.exists) {
+          const state = computeLiveTimerState(timerDoc.data() as LiveTimerDoc, nowMs);
+          let hideStale = false;
+          if (!isMe && state.isStale) {
+            const hbMs = Date.parse(state.lastHeartbeatAt || state.startedAt);
+            if (!Number.isNaN(hbMs) && nowMs - hbMs > 45 * 60 * 1000) {
+              hideStale = true;
+            }
+          }
+          if (!hideStale) {
+            liveTimer = {
+              status: state.status,
+              elapsedSec: state.elapsedSec,
+              accumulatedSec: state.accumulatedSec,
+              startedAt: state.startedAt,
+              resumedAt: state.resumedAt,
+              isStale: state.isStale,
+              isCapped: state.isCapped,
+            };
+          }
         }
 
         const history: Record<string, ReturnType<typeof sessionsFromDay>> = {};
@@ -318,8 +356,9 @@ export async function GET(request: NextRequest) {
           color: (sData.color as string) || member.color,
           icon: (sData.icon as string) || member.icon,
           avatarUrl: (sData.avatarUrl as string) || '',
-          isMe: auth.role === 'student' && member.studentId === auth.studentId,
+          isMe,
           isOptedOut,
+          liveTimer,
           history,
         };
       })
@@ -359,6 +398,7 @@ export async function GET(request: NextRequest) {
           currentStreak: pointsSummary.currentStreak,
           isMe: m.isMe,
           isOptedOut: m.isOptedOut,
+          liveTimer: m.liveTimer,
         };
       });
       return assignRanks(list);
@@ -382,6 +422,7 @@ export async function GET(request: NextRequest) {
               currentStreak: summary.currentStreak,
               isMe: m.isMe,
               isOptedOut: m.isOptedOut,
+              liveTimer: m.liveTimer,
             };
           })
         );
@@ -426,6 +467,7 @@ export async function GET(request: NextRequest) {
     });
 
     return json({
+      serverNow,
       group: {
         id: groupId,
         name: groupData.name || 'クラスレース',

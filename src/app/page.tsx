@@ -29,7 +29,6 @@ import {
   Users,
   X,
 } from 'lucide-react';
-import { FiBookOpen } from 'react-icons/fi';
 import { ui } from './ui';
 import TimelineView from './TimelineView';
 import StatsView from './StatsView';
@@ -45,6 +44,8 @@ import StudyComposerModal from '../components/StudyComposerModal';
 import ConfirmDialog, { ConfirmDialogOptions } from '../components/ConfirmDialog';
 import LivePresencePill from '../components/LivePresencePill';
 import LiveStudyBar from '../components/LiveStudyBar';
+import SubjectBadge from '../components/SubjectBadge';
+import AppTitle from '../components/AppTitle';
 import { useLiveTimer } from '../hooks/useLiveTimer';
 import TeacherReviewModal from '../components/TeacherReviewModal';
 import TeacherPasswordModal from '../components/TeacherPasswordModal';
@@ -1151,19 +1152,7 @@ export default function Home() {
     return (
       <div className={ui.shell}>
         <header className={ui.header}>
-          <div className="flex items-center gap-3">
-            <span className="flex size-9 items-center justify-center rounded-xl bg-primary/10 text-primary">
-              <FiBookOpen size={20} aria-hidden="true" />
-            </span>
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="font-extrabold text-base tracking-tight text-ink">宿題ノート</span>
-                <span className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-card-subtle border border-line text-muted">
-                  ログイン
-                </span>
-              </div>
-            </div>
-          </div>
+          <AppTitle variant="header" badge="ログイン" />
           <button
             type="button"
             className={ui.themeToggle}
@@ -1186,17 +1175,7 @@ export default function Home() {
     <div className={`${ui.shell} ${role === '生徒' && live.myTimer ? 'pb-24' : ''}`}>
       {/* ヘッダー */}
       <header className={ui.header}>
-        <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
-          <span className="flex size-8 sm:size-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
-            <FiBookOpen size={18} aria-hidden="true" />
-          </span>
-          <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
-            <span className="font-extrabold text-sm sm:text-base tracking-tight text-ink whitespace-nowrap">宿題ノート</span>
-            <span className="text-[10px] sm:text-[11px] font-bold px-1.5 sm:px-2 py-0.5 rounded-md bg-card-subtle text-muted shrink-0">
-              {role}用
-            </span>
-          </div>
-        </div>
+        <AppTitle variant="header" badge={`${role}用`} />
 
         {/* 先生・生徒別のアカウント表示/切り替えUI */}
         <div className="flex items-center gap-1.5 sm:gap-2 ml-auto">
@@ -1298,9 +1277,12 @@ export default function Home() {
 
               <button
                 type="button"
-                onClick={() => setStudentModalOpen(true)}
+                onClick={() => {
+                  setStudentModalOpen(true);
+                  void fetchStudents();
+                }}
                 className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-bold bg-transparent hover:bg-card-subtle text-muted hover:text-primary transition-all cursor-pointer"
-                title="生徒の追加・編集・URLコピー"
+                title="生徒の追加・編集・パスワード確認"
               >
                 <Users size={13} />
                 <span>生徒管理 ({students.length}/5)</span>
@@ -1665,21 +1647,20 @@ export default function Home() {
                           className="py-3.5 first:pt-1 last:pb-1 px-1 transition-colors"
                           key={session.id}
                         >
-                          {(session.minutes || formatRecordedTime(session.createdAt)) && (
-                            <div className="flex items-center gap-2 mb-1.5">
-                              {formatRecordedTime(session.createdAt) && (
-                                <span className="text-xs font-bold font-numbers text-ink tabular-nums">
-                                  {formatRecordedTime(session.createdAt)}
-                                </span>
-                              )}
-                              {session.minutes && (
-                                <span className="inline-flex items-center gap-1 text-xs font-bold font-numbers text-primary-ink">
-                                  <Clock size={12} />
-                                  {formatDuration(session.minutes)}
-                                </span>
-                              )}
-                            </div>
-                          )}
+                          <div className="flex flex-wrap items-center gap-2 mb-1.5">
+                            {formatRecordedTime(session.createdAt) && (
+                              <span className="text-xs font-bold font-numbers text-ink tabular-nums">
+                                {formatRecordedTime(session.createdAt)}
+                              </span>
+                            )}
+                            {session.minutes && (
+                              <span className="inline-flex items-center gap-1 text-xs font-bold font-numbers text-primary-ink">
+                                <Clock size={12} />
+                                {formatDuration(session.minutes)}
+                              </span>
+                            )}
+                            <SubjectBadge content={session.content} />
+                          </div>
                           <p className="m-0 text-sm sm:text-[15px] leading-relaxed text-ink whitespace-pre-wrap [overflow-wrap:anywhere]">
                             {session.content}
                           </p>
@@ -1801,9 +1782,9 @@ export default function Home() {
                           className="group py-3.5 first:pt-1 last:pb-1 px-1 transition-colors"
                           key={session.id}
                         >
-                          {/* 上段：記録時刻・学習時間 ＋ 右上に控えめなアイコン操作 */}
+                          {/* 上段：記録時刻・学習時間・教科バッジ ＋ 右上に控えめなアイコン操作 */}
                           <div className="flex items-center justify-between gap-2 mb-1.5">
-                            <div className="flex items-center gap-2">
+                            <div className="flex flex-wrap items-center gap-2 min-w-0">
                               {formatRecordedTime(session.createdAt) && (
                                 <span className="text-xs font-bold font-numbers text-ink tabular-nums">
                                   {formatRecordedTime(session.createdAt)}
@@ -1815,6 +1796,7 @@ export default function Home() {
                                   {formatDuration(session.minutes)}
                                 </span>
                               )}
+                              <SubjectBadge content={session.content} />
                             </div>
 
                             <div className="flex items-center gap-0.5">
@@ -1935,7 +1917,7 @@ export default function Home() {
           role={role}
           currentStudentId={selectedStudentId}
           refreshKey={profileRefreshKey}
-          liveMembers={live.liveMembers}
+          liveSignature={live.liveSignature}
           myTimer={live.myTimer}
           myElapsedSec={live.myElapsedSec}
           liveBusy={live.busy}
@@ -2166,10 +2148,11 @@ export default function Home() {
                           <span className="font-bold text-sm text-ink">{student.name}</span>
                           <span className="text-xs text-muted">（表示名: {student.displayName}）</span>
                         </div>
-                        <div className="flex items-center gap-3 mt-0.5">
+                        <div className="flex flex-wrap items-center gap-2.5 mt-1">
                           <span className="text-[11px] text-muted font-mono">ID: {student.id}</span>
-                          <div className="flex items-center gap-1.5 text-xs">
-                            <span className="text-muted text-[11px]">PIN:</span>
+                          <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-card border border-line/80 text-xs">
+                            <KeyRound size={11} className="text-muted shrink-0" aria-hidden="true" />
+                            <span className="text-muted text-[11px] font-semibold">PW:</span>
                             <span className="font-mono font-bold text-ink">
                               {showPlainPasswordMap[student.id] ? (student.passwordPlain || '1234') : '••••'}
                             </span>
@@ -2181,9 +2164,9 @@ export default function Home() {
                                   [student.id]: !prev[student.id],
                                 }))
                               }
-                              className="text-[11px] text-primary hover:underline cursor-pointer"
+                              className="text-[11px] font-bold text-primary hover:underline cursor-pointer ml-0.5"
                             >
-                              {showPlainPasswordMap[student.id] ? '隠す' : '表示'}
+                              {showPlainPasswordMap[student.id] ? '隠す' : '確認'}
                             </button>
                           </div>
                         </div>
@@ -2195,10 +2178,10 @@ export default function Home() {
                         type="button"
                         onClick={() => startEditStudent(student)}
                         className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold rounded-xl bg-card border border-line hover:border-primary/40 text-ink hover:text-primary shadow-subtle transition-all cursor-pointer"
-                        title="名前や表示名、色を変更"
+                        title="名前・表示名・色・パスワードを編集"
                       >
                         <PencilLine size={13} className="text-primary" />
-                        <span>名前変更</span>
+                        <span>編集</span>
                       </button>
                     </div>
                   </div>

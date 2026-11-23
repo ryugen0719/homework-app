@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { formatDuration } from '../lib/format-duration';
 import GlideSelect from '../components/GlideSelect/GlideSelect';
+import SubjectBadge from '../components/SubjectBadge';
 
 export type StudySession = {
   id: string;
@@ -538,9 +539,12 @@ export default function TimelineView({
                       onOpenPreview={onOpenPreview}
                     />
                     <div className="mt-2.5">
-                      <p className="text-xs sm:text-sm font-semibold text-ink line-clamp-2 m-0">
-                        {photo.content}
-                      </p>
+                      <div className="flex items-start justify-between gap-2">
+                        <p className="text-xs sm:text-sm font-semibold text-ink line-clamp-2 m-0 min-w-0">
+                          {photo.content}
+                        </p>
+                        <SubjectBadge content={photo.content} className="mt-0.5" />
+                      </div>
                       {photo.reviewComment && (
                         <p className="mt-1.5 text-xs text-reward-ink bg-reward-soft/55 p-2 rounded-lg line-clamp-2 m-0">
                           先生: {photo.reviewComment}
@@ -645,11 +649,14 @@ export default function TimelineView({
                           ) : null}
                         </div>
 
-                        {/* 勉強内容と提出写真 */}
+                        {/* 勉強内容と提出写真（教科バッジは内容の横に配置して縦スペースを消費しない） */}
                         <div className="min-w-0 flex flex-col gap-2">
-                          <p className="text-sm sm:text-[15px] leading-relaxed text-ink whitespace-pre-wrap break-words m-0 font-normal">
-                            {session.content}
-                          </p>
+                          <div className="flex items-start justify-between gap-2.5">
+                            <p className="text-sm sm:text-[15px] leading-relaxed text-ink whitespace-pre-wrap break-words m-0 font-normal min-w-0">
+                              {session.content}
+                            </p>
+                            <SubjectBadge content={session.content} className="mt-1" />
+                          </div>
 
                           {session.evidencePath && (
                             <div className="mt-0.5">

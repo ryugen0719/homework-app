@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'motion/react';
 import {
   ArrowLeft,
@@ -30,6 +30,7 @@ import DateRangePicker from '../components/DateRangePicker';
 import RaceFullscreenOverlay from '../components/RaceFullscreenOverlay';
 import { formatDuration } from '../lib/format-duration';
 import {
+  computeInterpolatedSec,
   formatTimerClock,
   getLapProgress,
   LiveMemberComputed,
@@ -47,6 +48,16 @@ type RankingPeriod =
 
 type CompareMetric = 'points' | 'minutes';
 
+interface RankingMemberLiveTimer {
+  status: 'running' | 'paused';
+  elapsedSec: number;
+  accumulatedSec: number;
+  startedAt: string;
+  resumedAt: string | null;
+  isStale: boolean;
+  isCapped: boolean;
+}
+
 interface RankingMember {
   studentId: string;
   displayName: string;
@@ -61,6 +72,7 @@ interface RankingMember {
   rank: number;
   isMe?: boolean;
   isOptedOut?: boolean;
+  liveTimer?: RankingMemberLiveTimer | null;
 }
 
 interface RecentWeekSummary {
@@ -82,6 +94,7 @@ interface RecentWeekSummary {
 }
 
 interface RankingData {
+  serverNow?: string;
   group: {
     id: string;
     name: string;
@@ -116,7 +129,7 @@ interface RankingViewProps {
   role: '生徒' | '先生';
   currentStudentId?: string;
   refreshKey?: number;
-  liveMembers?: LiveMemberComputed[];
+  liveSignature?: string;
   myTimer?: LiveTimerState | null;
   myElapsedSec?: number;
   liveBusy?: boolean;
@@ -240,17 +253,13 @@ function SummaryCardSkeleton() {
       aria-busy="true"
       className="rounded-2xl bg-card p-5 sm:p-6 shadow-card animate-pulse"
     >
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-5 sm:gap-6 items-end">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 sm:gap-6 items-end">
         <div>
           <div className="h-3.5 w-16 rounded-md bg-card-subtle mb-2.5" />
           <div className="flex items-baseline gap-2">
             <div className="h-9 w-20 rounded-lg bg-card-subtle" />
             <div className="h-4 w-10 rounded-md bg-card-subtle/80" />
           </div>
-        </div>
-        <div>
-          <div className="h-3.5 w-20 rounded-md bg-card-subtle mb-2.5" />
-          <div className="h-9 w-28 rounded-lg bg-card-subtle" />
         </div>
         <div className="sm:border-l sm:border-line/50 sm:pl-6">
           <div className="h-3.5 w-20 rounded-md bg-card-subtle mb-2.5" />
@@ -375,7 +384,7 @@ export default function RankingView({
   token,
   role,
   refreshKey = 0,
-  liveMembers = [],
+  liveSignature = '',
   myTimer = null,
   myElapsedSec = 0,
   liveBusy = false,
@@ -418,6 +427,9 @@ export default function RankingView({
   const [fullscreenOpen, setFullscreenOpen] = useState(false);
   const [rankDelta, setRankDelta] = useState<number>(0);
   const prevRankRef = useRef<{ key: string; rank: number } | null>(null);
+  const requestSeqRef = useRef<number>(0);
+  const [tickNow, setTickNow] = useState<number>(0);
+  const [serverOffsetMs, setServerOffsetMs] = useState<number>(0);
 
   // 招待参加用モーダル
   const [showJoinModal, setShowJoinModal] = useState(false);
@@ -433,57 +445,6 @@ export default function RankingView({
 
   const buildUrl = (qs: string) => (qs ? `/api/ranking?${qs}` : '/api/ranking');
 
-  const fetchRanking = async () => {
-    try {
-      setIsRefreshing(true);
-      setError('');
-      const res = await fetch(buildUrl(queryString), {
-        headers: { 'x-app-token': token },
-        cache: 'no-store',
-      });
-      if (!res.ok) {
-        throw new Error('ランキングの取得に失敗しました');
-      }
-      const json: RankingData = await res.json();
-      rankingCache.set(cacheKey, json);
-      setFetched({ key: cacheKey, data: json });
-    } catch (e) {
-      setError(e instanceof Error ? e.message : '取得に失敗しました');
-    } finally {
-      setIsRefreshing(false);
-    }
-  };
-
-  useEffect(() => {
-    let active = true;
-
-    const load = async () => {
-      try {
-        const res = await fetch(buildUrl(queryString), {
-          headers: { 'x-app-token': token },
-          cache: 'no-store',
-        });
-        if (!res.ok) {
-          throw new Error('ランキングの取得に失敗しました');
-        }
-        const json: RankingData = await res.json();
-        rankingCache.set(cacheKey, json);
-        if (active) {
-          setFetched({ key: cacheKey, data: json });
-          setError('');
-        }
-      } catch (e) {
-        if (active && !rankingCache.has(cacheKey)) {
-          setError(e instanceof Error ? e.message : '取得に失敗しました');
-        }
-      }
-    };
-    void load();
-    return () => {
-      active = false;
-    };
-  }, [token, refreshKey, queryString, cacheKey]);
-
   const todayStr = todayJstStr();
   const isDetailView = Boolean(detailWeekStart);
   const isLiveEligible =
@@ -494,19 +455,137 @@ export default function RankingView({
       period === 'all' ||
       (period === 'custom' && customEnd >= todayStr));
 
+  // 単一スナップショット取得（古いレスポンスはシーケンス番号で破棄）
+  const loadSnapshot = useCallback(
+    async (options: { showError?: boolean; signal?: AbortSignal } = {}) => {
+      if (!token) return;
+      const reqSeq = ++requestSeqRef.current;
+      try {
+        const res = await fetch(buildUrl(queryString), {
+          headers: { 'x-app-token': token },
+          cache: 'no-store',
+          signal: options.signal,
+        });
+        if (!res.ok) {
+          throw new Error('ランキングの取得に失敗しました');
+        }
+        const json: RankingData = await res.json();
+        if (reqSeq !== requestSeqRef.current) return;
+        if (json.serverNow) {
+          const parsed = Date.parse(json.serverNow);
+          if (!Number.isNaN(parsed)) {
+            setServerOffsetMs(parsed - Date.now());
+          }
+        }
+        rankingCache.set(cacheKey, json);
+        setFetched({ key: cacheKey, data: json });
+        setTickNow(Date.now());
+        setError('');
+      } catch (e) {
+        if (e instanceof DOMException && e.name === 'AbortError') return;
+        if (reqSeq === requestSeqRef.current && (options.showError || !rankingCache.has(cacheKey))) {
+          setError(e instanceof Error ? e.message : '取得に失敗しました');
+        }
+      }
+    },
+    [token, queryString, cacheKey]
+  );
+
+  const fetchRanking = useCallback(async () => {
+    setIsRefreshing(true);
+    setError('');
+    try {
+      await loadSnapshot({ showError: true });
+    } finally {
+      setIsRefreshing(false);
+    }
+  }, [loadSnapshot]);
+
+  // 初回・期間変更・自分の記録保存・誰かのライブ状態変化時に即時同期
+  useEffect(() => {
+    const controller = new AbortController();
+    const timerId = window.setTimeout(() => {
+      void loadSnapshot({ signal: controller.signal });
+    }, 0);
+    return () => {
+      window.clearTimeout(timerId);
+      controller.abort();
+    };
+  }, [loadSnapshot, refreshKey, liveSignature]);
+
+  // ライブ対象期間を表示中は15秒ごとにサイレント同期（他メンバーの手動記録や終了も自動反映）
+  useEffect(() => {
+    if (!isLiveEligible || !token) return;
+
+    const pollId = window.setInterval(() => {
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+      void loadSnapshot();
+    }, 15000);
+
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        void loadSnapshot();
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+
+    return () => {
+      window.clearInterval(pollId);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  }, [isLiveEligible, token, loadSnapshot]);
+
+  // スナップショット内に勉強中メンバーがいれば1秒ごとにローカル補間を更新
+  const hasAnyRunningInSnapshot = useMemo(() => {
+    if (!isLiveEligible || !currentData) return false;
+    return currentData.members.some((m) => m.liveTimer?.status === 'running');
+  }, [isLiveEligible, currentData]);
+
+  useEffect(() => {
+    if (!hasAnyRunningInSnapshot) return;
+    const id = window.setInterval(() => {
+      setTickNow(Date.now());
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, [hasAnyRunningInSnapshot]);
+
+  const estimatedServerNowMs = tickNow > 0 ? tickNow + serverOffsetMs : 0;
+
+  // 確定スコアと同じスナップショット由来の liveTimer からライブ状態を算出（二重加算・巻き戻りゼロ）
   const liveByStudentId = useMemo(() => {
     const map = new Map<string, LiveMemberComputed>();
-    if (!isLiveEligible) return map;
-    for (const m of liveMembers) {
-      map.set(m.studentId, m);
+    if (!isLiveEligible || !currentData) return map;
+    for (const m of currentData.members) {
+      if (!m.liveTimer) continue;
+      const liveElapsedSec = computeInterpolatedSec(m.liveTimer, estimatedServerNowMs);
+      map.set(m.studentId, {
+        studentId: m.studentId,
+        displayName: m.displayName,
+        color: m.color,
+        icon: m.icon,
+        avatarUrl: m.avatarUrl || '',
+        isMe: Boolean(m.isMe),
+        status: m.liveTimer.status,
+        elapsedSec: m.liveTimer.elapsedSec,
+        accumulatedSec: m.liveTimer.accumulatedSec,
+        startedAt: m.liveTimer.startedAt,
+        resumedAt: m.liveTimer.resumedAt,
+        isStale: m.liveTimer.isStale,
+        isCapped: m.liveTimer.isCapped,
+        liveElapsedSec,
+        liveFlooredMinutes: Math.floor(liveElapsedSec / 60),
+      });
     }
     return map;
-  }, [liveMembers, isLiveEligible]);
+  }, [currentData, isLiveEligible, estimatedServerNowMs]);
 
   const activeRunningCount = useMemo(() => {
-    if (!isLiveEligible) return 0;
-    return liveMembers.filter((m) => m.status === 'running').length;
-  }, [liveMembers, isLiveEligible]);
+    let count = 0;
+    for (const m of liveByStudentId.values()) {
+      if (m.status === 'running') count += 1;
+    }
+    return count;
+  }, [liveByStudentId]);
 
   const standings = useMemo(() => {
     if (!currentData) return [];
@@ -525,10 +604,6 @@ export default function RankingView({
   }, [currentData, metric, isLiveEligible, liveByStudentId]);
 
   const myStanding = useMemo(() => standings.find((m) => m.isMe) ?? null, [standings]);
-  const myLive = useMemo(
-    () => (myStanding ? liveByStudentId.get(myStanding.studentId) ?? null : null),
-    [myStanding, liveByStudentId]
-  );
 
   // 同一期間内での順位変動フィードバック
   useEffect(() => {
@@ -602,10 +677,13 @@ export default function RankingView({
 
   const { group, targetWeekStart, currentWeekStart, recentWeeks = [] } = displayData;
   const isStudent = role === '生徒';
+  const showFocusBar = isStudent && isLiveEligible;
   const hasAnyScore = standings.some((m) => m.hasScore);
   const topVal = standings[0]?.metricValue ?? 0;
   const effectivePeriod: RankingPeriod = isDetailView ? 'last-week' : period;
   const { scaleValue, goalValue, isGoalExceeded } = computeTrackScale(topVal, metric, effectivePeriod);
+  const goalPct = scaleValue > 0 ? Math.min(100, Math.round((goalValue / scaleValue) * 100)) : 100;
+  const showMidpointLabel = !isGoalExceeded || Math.abs(goalPct - 50) >= 20;
   const leader = standings[0] ?? null;
   const second = standings[1] ?? null;
   const myBonusTotal = (myStanding?.weekStreakBonus || 0) + (myStanding?.weekPhotoBonus || 0);
@@ -639,24 +717,6 @@ export default function RankingView({
       value: formatMetric(diff),
       tone: 'blue',
     };
-  };
-
-  // レーン内の簡潔な差テキスト
-  const getLaneGapText = (member: RankedStanding, index: number): string | null => {
-    if (!hasAnyScore) return null;
-    if (member.computedRank === 1) {
-      if (member.isTied) return '同率1位';
-      if (second && second.metricValue < member.metricValue) {
-        return `2位と +${formatMetric(member.metricValue - second.metricValue)}差`;
-      }
-      return '単独1位';
-    }
-    const higher = standings
-      .slice(0, index)
-      .reverse()
-      .find((m) => m.metricValue > member.metricValue);
-    if (!higher) return null;
-    return `${higher.computedRank}位まであと ${formatMetric(higher.metricValue - member.metricValue)}`;
   };
 
   // ヘッダー表示用の期間テキスト（custom時は日付入力欄と重複させない）
@@ -706,7 +766,8 @@ export default function RankingView({
             <button
               type="button"
               onClick={() => shiftDetailWeek(-1)}
-              className="grid size-8 place-items-center rounded-xl text-muted hover:text-ink hover:bg-card-subtle transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-primary"
+              className="grid size-8 place-items-center rounded-xl text-muted hover:text-ink hover:bg-card-subtle active:scale-95 transition-all cursor-pointer focus-visible:outline-2 focus-visible:outline-primary"
+              title="前の週を見る"
               aria-label="前の週を見る"
             >
               <ChevronLeft size={16} />
@@ -718,7 +779,8 @@ export default function RankingView({
             <button
               type="button"
               onClick={() => shiftDetailWeek(1)}
-              className="grid size-8 place-items-center rounded-xl text-muted hover:text-ink hover:bg-card-subtle transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-primary"
+              className="grid size-8 place-items-center rounded-xl text-muted hover:text-ink hover:bg-card-subtle active:scale-95 transition-all cursor-pointer focus-visible:outline-2 focus-visible:outline-primary"
+              title="次の週を見る"
               aria-label="次の週を見る"
             >
               <ChevronRight size={16} />
@@ -786,7 +848,7 @@ export default function RankingView({
             <button
               type="button"
               onClick={() => setShowRules((v) => !v)}
-              className={`grid size-9 place-items-center rounded-xl transition-colors cursor-pointer active:scale-95 focus-visible:outline-2 focus-visible:outline-primary ${
+              className={`grid size-9 place-items-center rounded-xl transition-all cursor-pointer active:scale-95 focus-visible:outline-2 focus-visible:outline-primary ${
                 showRules
                   ? 'bg-primary-soft text-primary-ink'
                   : 'text-muted hover:text-ink hover:bg-card-subtle'
@@ -798,20 +860,22 @@ export default function RankingView({
               <Info size={16} />
             </button>
 
-            <button
-              type="button"
-              onClick={() => setFullscreenOpen(true)}
-              className="grid size-9 place-items-center rounded-xl text-muted hover:text-ink hover:bg-card-subtle transition-colors cursor-pointer active:scale-95 focus-visible:outline-2 focus-visible:outline-primary"
-              title="全画面で表示（勉強中モード）"
-              aria-label="全画面表示"
-            >
-              <Maximize2 size={16} />
-            </button>
+            {!showFocusBar && (
+              <button
+                type="button"
+                onClick={() => setFullscreenOpen(true)}
+                className="grid size-9 place-items-center rounded-xl text-muted hover:text-ink hover:bg-card-subtle transition-all cursor-pointer active:scale-95 focus-visible:outline-2 focus-visible:outline-primary"
+                title="全画面で表示（勉強中モード）"
+                aria-label="全画面表示"
+              >
+                <Maximize2 size={16} />
+              </button>
+            )}
 
             <button
               type="button"
               onClick={() => void fetchRanking()}
-              className="grid size-9 place-items-center rounded-xl text-muted hover:text-ink hover:bg-card-subtle transition-colors cursor-pointer active:scale-95 focus-visible:outline-2 focus-visible:outline-primary"
+              className="grid size-9 place-items-center rounded-xl text-muted hover:text-ink hover:bg-card-subtle transition-all cursor-pointer active:scale-95 focus-visible:outline-2 focus-visible:outline-primary"
               title="最新の状態に更新"
               aria-label="更新"
             >
@@ -894,30 +958,35 @@ export default function RankingView({
 
         {/* 開閉式ルールガイド */}
         {showRules && (
-          <div className="px-4 py-3 rounded-2xl bg-card-subtle/65 grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-xs">
-            <div className="flex items-center gap-2 text-ink">
-              <Clock size={14} className="text-primary shrink-0" />
-              <span>勉強時間: <strong className="font-numbers">1分 = 1pt</strong></span>
+          <div className="px-4 py-3 rounded-2xl bg-card-subtle/75 space-y-2 text-xs">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+              <div className="flex items-center gap-2 text-ink">
+                <Clock size={14} className="text-primary shrink-0" />
+                <span>勉強時間: <strong className="font-numbers">1分 = 1pt</strong></span>
+              </div>
+              <div className="flex items-center gap-2 text-ink">
+                <Flame size={14} className="text-amber-500 shrink-0" />
+                <span>連続学習（1日10分+）: <strong className="font-numbers">+5〜+25pt/日</strong></span>
+              </div>
+              <div className="flex items-center gap-2 text-ink">
+                <Camera size={14} className="text-reward shrink-0" />
+                <span>写真提出: <strong className="font-numbers">+5pt/日</strong></span>
+              </div>
             </div>
-            <div className="flex items-center gap-2 text-ink">
-              <Flame size={14} className="text-amber-500 shrink-0" />
-              <span>連続10分+: <strong className="font-numbers">+5〜+25pt/日</strong></span>
-            </div>
-            <div className="flex items-center gap-2 text-ink">
-              <Camera size={14} className="text-reward shrink-0" />
-              <span>写真提出: <strong className="font-numbers">+5pt/日</strong></span>
-            </div>
+            <p className="m-0 text-[11px] font-medium text-muted">
+              合計ポイント ＝ 勉強時間pt ＋ 連続学習ボーナス ＋ 写真提出ボーナス（目標 {formatMetric(goalValue)} は目安の到達ラインです）
+            </p>
           </div>
         )}
       </div>
 
-      {/* サマリーカード（優先順位: 1.現在順位 → 2.獲得ポイント → 3.1位との差 → 4.学習時間 → 5.ボーナス） */}
+      {/* サマリーカード（順位と1位との差を主役に、下段で学習時間・ボーナス内訳と目標達成を明示） */}
       {isStudent && isPeriodLoading ? (
         <SummaryCardSkeleton />
       ) : isStudent && myStanding ? (
         <section aria-label="あなたの成績サマリー" className="rounded-2xl bg-card p-5 sm:p-6 shadow-card">
-          {/* 上段：主役KPI 3列（順位・獲得スコア・1位との差） */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-5 sm:gap-6 items-end">
+          {/* 上段：主役KPI 2列（現在順位・1位との差） */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 sm:gap-6 items-end">
             {/* 1. 現在順位 */}
             <div>
               <span className="block text-xs font-semibold text-muted mb-1.5">
@@ -952,36 +1021,9 @@ export default function RankingView({
               </div>
             </div>
 
-            {/* 2. 獲得ポイント（または学習時間） */}
-            <div>
-              <span className="block text-xs font-semibold text-muted mb-1.5">
-                {metric === 'minutes' ? '合計学習時間' : '獲得ポイント'}
-              </span>
-              <div className="flex items-baseline gap-1.5 font-numbers tabular-nums">
-                {metric === 'minutes' ? (
-                  <span className="text-3xl sm:text-4xl font-extrabold tracking-tight text-primary leading-none">
-                    {formatDuration(myStanding.weekMinutes)}
-                  </span>
-                ) : (
-                  <>
-                    <span className="text-3xl sm:text-4xl font-extrabold tracking-tight text-primary leading-none">
-                      <CountUp
-                        key={`${cacheKey}-pts`}
-                        to={myStanding.weekPoints}
-                        duration={0.5}
-                        trigger="load"
-                      />
-                    </span>
-                    <span className="text-sm sm:text-base font-bold text-primary">pt</span>
-                  </>
-                )}
-              </div>
-            </div>
-
-            {/* 3. 1位との差（独立した明確な指標）＋ 勉強中は次の周回ターゲットも補助表示 */}
+            {/* 2. 1位との差（1位は2位とのリード） */}
             {(() => {
               const gap = getGapInfo(myStanding);
-              const myLap = myLive ? getLapProgress(myLive.liveElapsedSec) : null;
               return (
                 <div className="sm:border-l sm:border-line/50 sm:pl-6">
                   <span className="block text-xs font-semibold text-muted mb-1.5">
@@ -1000,44 +1042,53 @@ export default function RankingView({
                       {gap.value}
                     </span>
                   </div>
-                  {myLap && myLive?.status === 'running' && (
-                    <span className="mt-1.5 inline-flex items-center gap-1 text-[11px] font-bold font-numbers tabular-nums text-reward-ink">
-                      <span>LAP {myLap.lapNumber} クリアまであと {formatTimerClock(myLap.remainingSecInLap)}</span>
-                    </span>
-                  )}
                 </div>
               );
             })()}
           </div>
 
-          {/* 下段：補助情報（4. 学習時間・5. ボーナスポイント・目標達成） */}
+          {/* 下段：ポイント内訳（学習時間＋連続学習ボーナス＋写真提出ボーナス）と目標達成 */}
           <div className="mt-5 pt-3.5 border-t border-line/50 flex flex-wrap items-center justify-between gap-3 text-xs sm:text-sm font-numbers tabular-nums">
-            <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5 text-muted">
-              {metric === 'points' ? (
-                <span className="inline-flex items-center gap-1.5">
-                  <Clock size={14} className="text-muted shrink-0" />
-                  <span>学習時間</span>
-                  <strong className="text-ink font-bold">{formatDuration(myStanding.weekMinutes)}</strong>
-                </span>
-              ) : (
-                <span className="inline-flex items-center gap-1.5">
-                  <Flag size={14} className="text-muted shrink-0" />
-                  <span>獲得ポイント</span>
-                  <strong className="text-ink font-bold">{myStanding.weekPoints}pt</strong>
-                </span>
-              )}
-
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-muted">
               <span className="inline-flex items-center gap-1.5">
-                <Flame size={14} className="text-muted shrink-0" />
-                <span>ボーナス</span>
-                <strong className="text-ink font-bold">+{myBonusTotal}pt</strong>
-                {(myStanding.weekStreakBonus > 0 || (myStanding.weekPhotoBonus || 0) > 0) && (
-                  <span className="text-xs text-muted">
-                    （連続+{myStanding.weekStreakBonus}
-                    {(myStanding.weekPhotoBonus || 0) > 0 ? `・写真+${myStanding.weekPhotoBonus}` : ''}）
-                  </span>
+                <Clock size={14} className="text-primary shrink-0" aria-hidden="true" />
+                <span>学習時間</span>
+                <strong className="text-ink font-bold">{formatDuration(myStanding.weekMinutes)}</strong>
+                {metric === 'points' && (
+                  <span className="text-xs text-muted">（{myStanding.weekMinutes}pt）</span>
                 )}
               </span>
+
+              {myBonusTotal > 0 ? (
+                <>
+                  {myStanding.weekStreakBonus > 0 && (
+                    <span
+                      className="inline-flex items-center gap-1.5"
+                      title="1日10分以上の連続学習によるボーナス（+5〜+25pt/日）"
+                    >
+                      <Flame size={14} className="text-amber-500 shrink-0" aria-hidden="true" />
+                      <span>連続学習</span>
+                      <strong className="text-ink font-bold">+{myStanding.weekStreakBonus}pt</strong>
+                    </span>
+                  )}
+                  {(myStanding.weekPhotoBonus || 0) > 0 && (
+                    <span
+                      className="inline-flex items-center gap-1.5"
+                      title="写真付き記録の提出によるボーナス（+5pt/日）"
+                    >
+                      <Camera size={14} className="text-reward shrink-0" aria-hidden="true" />
+                      <span>写真提出</span>
+                      <strong className="text-ink font-bold">+{myStanding.weekPhotoBonus}pt</strong>
+                    </span>
+                  )}
+                </>
+              ) : (
+                <span className="inline-flex items-center gap-1.5">
+                  <Flame size={14} className="text-muted shrink-0" aria-hidden="true" />
+                  <span>ボーナス</span>
+                  <strong className="text-ink font-bold">0pt</strong>
+                </span>
+              )}
             </div>
 
             {myGoalReached && (
@@ -1045,9 +1096,9 @@ export default function RankingView({
                 initial={{ opacity: 0, scale: 0.94 }}
                 animate={{ opacity: 1, scale: 1 }}
                 transition={{ duration: 0.25 }}
-                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400 text-xs font-bold"
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-500/15 text-amber-700 dark:text-amber-300 text-xs font-bold"
               >
-                <CheckCircle2 size={13} />
+                <CheckCircle2 size={13} aria-hidden="true" />
                 <span>
                   目標 {formatMetric(goalValue)} 達成
                   {myStanding.metricValue > goalValue
@@ -1061,7 +1112,7 @@ export default function RankingView({
       ) : null}
 
       {/* フォーカスバー：勉強の開始・全画面表示をここに集約（生徒・ライブ対象期間のみ） */}
-      {isStudent && isLiveEligible && (
+      {showFocusBar && (
         <section
           aria-label="勉強タイマー"
           className={`flex flex-wrap items-center justify-between gap-3 rounded-2xl px-4 sm:px-5 py-3 ${
@@ -1165,34 +1216,61 @@ export default function RankingView({
           aria-label="クラスレース進行トラック"
           className={`rounded-2xl bg-card shadow-card overflow-hidden transition-opacity ${isRefreshing ? 'opacity-65' : ''}`}
         >
-          {/* トラック目盛りヘッダー（START・GOAL/表示上限のみに絞って視線を集中） */}
-          <div className="grid grid-cols-1 sm:grid-cols-[172px_1fr_156px] items-center bg-card-subtle/60 px-4 sm:px-6 py-2.5 text-xs font-semibold text-muted font-numbers tabular-nums">
-            <span className="hidden sm:block">メンバー</span>
-            <div className="flex items-center justify-between px-4 sm:px-5">
-              <span className="font-bold text-ink">START</span>
-              <span className="inline-flex items-center gap-1 font-bold text-ink">
-                <Flag size={12} className={isGoalExceeded ? 'text-amber-500' : 'text-primary'} />
-                <span>
-                  {isGoalExceeded
-                    ? `表示上限 ${formatMetric(scaleValue)}`
-                    : `GOAL ${formatMetric(scaleValue)}`}
-                </span>
+          {/* トラック目盛りヘッダー（START・目標/中間・上限をガイドライン位置と完全一致させる） */}
+          <div className="grid grid-cols-1 sm:grid-cols-[172px_1fr_156px] items-center bg-card-subtle/75 px-4 sm:px-6 py-2.5 text-xs font-semibold text-muted font-numbers tabular-nums">
+            <span className="hidden sm:block text-ink/80">メンバー</span>
+            <div className="relative h-5 mx-4 sm:mx-5">
+              <span className="absolute left-0 top-1/2 -translate-y-1/2 font-bold text-ink">
+                START
               </span>
+              {isGoalExceeded ? (
+                <>
+                  <span
+                    className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 inline-flex items-center gap-1 font-bold text-amber-700 dark:text-amber-300 whitespace-nowrap"
+                    style={{ left: `${goalPct}%` }}
+                  >
+                    <Flag size={11} className="shrink-0" aria-hidden="true" />
+                    <span>目標 {formatMetric(goalValue)}</span>
+                  </span>
+                  {showMidpointLabel && (
+                    <span className="hidden md:inline absolute left-1/2 top-1/2 -translate-y-1/2 -translate-x-1/2 font-semibold text-muted whitespace-nowrap">
+                      中間 {formatMetric(Math.round(scaleValue * 0.5))}
+                    </span>
+                  )}
+                  <span className="absolute right-0 top-1/2 -translate-y-1/2 font-bold text-ink/80 whitespace-nowrap">
+                    上限 {formatMetric(scaleValue)}
+                  </span>
+                </>
+              ) : (
+                <>
+                  <span className="absolute left-1/2 top-1/2 -translate-y-1/2 -translate-x-1/2 font-semibold text-muted whitespace-nowrap">
+                    中間 {formatMetric(Math.round(scaleValue * 0.5))}
+                  </span>
+                  <span className="absolute right-0 top-1/2 -translate-y-1/2 inline-flex items-center gap-1 font-bold text-primary whitespace-nowrap">
+                    <Flag size={11} className="shrink-0" aria-hidden="true" />
+                    <span>目標 {formatMetric(goalValue)}</span>
+                  </span>
+                </>
+              )}
             </div>
-            <span className="hidden sm:block text-right">スコア</span>
+            <span className="hidden sm:block text-right text-ink/80">
+              {metric === 'minutes' ? '時間 / 進捗' : 'ポイント / 進捗'}
+            </span>
           </div>
 
           {/* 各プレイヤーのレーン */}
           <div className="divide-y divide-line/50">
-            {standings.map((member, index) => {
+            {standings.map((member) => {
               const rawRatio = scaleValue > 0 ? Math.min(1, member.metricValue / scaleValue) : 0;
+              const barPct = Number((rawRatio * 100).toFixed(2));
               const progressPct = Math.round(rawRatio * 100);
               const reachedGoal = member.hasScore && member.metricValue >= goalValue;
               const isFirst = member.computedRank === 1 && member.hasScore;
-              const laneGap = getLaneGapText(member, index);
               const liveMember = liveByStudentId.get(member.studentId) ?? null;
               const isLiveRunning = liveMember?.status === 'running';
+              const isLivePaused = Boolean(liveMember && !isLiveRunning);
               const lapInfo = liveMember ? getLapProgress(liveMember.liveElapsedSec) : null;
+              const liveDelta = liveMember?.liveFlooredMinutes ?? 0;
 
               // 統一カラーシステム: ブルー=自分 / グリーン=相手（1位はゴールドアクセント）
               const barColor = member.isMe ? 'var(--primary)' : 'var(--reward)';
@@ -1217,13 +1295,13 @@ export default function RankingView({
                   )}
 
                   <div className="grid grid-cols-1 sm:grid-cols-[172px_1fr_156px] items-center gap-3 sm:gap-5">
-                    {/* 1列目：順位・メンバー名・勉強中バッジ */}
+                    {/* 1列目：順位・メンバー名・目標達成・勉強中バッジ */}
                     <div className="flex items-center justify-between gap-2 min-w-0">
                       <div className="min-w-0">
-                        <div className="flex items-center gap-2.5 min-w-0">
+                        <div className="flex items-center gap-2 min-w-0">
                           <span
-                            className={`inline-flex items-center gap-1 min-w-[48px] text-xs sm:text-sm font-extrabold font-numbers tabular-nums shrink-0 ${
-                              isFirst ? 'text-amber-500 dark:text-amber-400' : 'text-muted'
+                            className={`inline-flex items-center gap-1 min-w-[46px] text-xs sm:text-sm font-extrabold font-numbers tabular-nums shrink-0 ${
+                              isFirst ? 'text-amber-600 dark:text-amber-400' : 'text-muted'
                             }`}
                           >
                             {isFirst && <Crown size={15} className="shrink-0" aria-hidden="true" />}
@@ -1241,19 +1319,30 @@ export default function RankingView({
                           )}
                         </div>
 
-                        {liveMember && (
-                          <div className="mt-1 ml-[58px] flex items-center gap-1.5 min-w-0">
-                            {isLiveRunning ? (
-                              <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-reward-soft text-reward-ink text-[11px] font-bold font-numbers tabular-nums">
-                                <span className="relative flex size-1.5 shrink-0" aria-hidden="true">
-                                  <span className="live-ping absolute inline-flex h-full w-full rounded-full bg-reward opacity-75" />
-                                  <span className="relative inline-flex rounded-full size-1.5 bg-reward" />
+                        {(liveMember || reachedGoal) && (
+                          <div className="mt-1 ml-[54px] flex flex-wrap items-center gap-1.5 min-w-0">
+                            {liveMember && (
+                              isLiveRunning ? (
+                                <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-reward-soft text-reward-ink text-[11px] font-bold font-numbers tabular-nums">
+                                  <span className="relative flex size-1.5 shrink-0" aria-hidden="true">
+                                    <span className="live-ping absolute inline-flex h-full w-full rounded-full bg-reward opacity-75" />
+                                    <span className="relative inline-flex rounded-full size-1.5 bg-reward" />
+                                  </span>
+                                  <span>勉強中 {formatTimerClock(liveMember.liveElapsedSec)}</span>
                                 </span>
-                                <span>勉強中 {formatTimerClock(liveMember.liveElapsedSec)}</span>
-                              </span>
-                            ) : (
-                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-700 dark:text-amber-300 text-[11px] font-bold font-numbers tabular-nums">
-                                <span>一時停止 {formatTimerClock(liveMember.liveElapsedSec)}</span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-700 dark:text-amber-300 text-[11px] font-bold font-numbers tabular-nums">
+                                  <span>一時停止 {formatTimerClock(liveMember.liveElapsedSec)}</span>
+                                </span>
+                              )
+                            )}
+                            {reachedGoal && (
+                              <span
+                                className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md bg-amber-500/15 text-amber-700 dark:text-amber-300 text-[10px] font-bold"
+                                title={`目標 ${formatMetric(goalValue)} 達成`}
+                              >
+                                <Flag size={10} aria-hidden="true" />
+                                <span>目標達成</span>
                               </span>
                             )}
                           </div>
@@ -1265,7 +1354,18 @@ export default function RankingView({
                         <span className={`text-base font-extrabold ${member.isMe ? 'text-primary' : 'text-ink'}`}>
                           {formatMetric(member.metricValue)}
                         </span>
-                        <span className="text-xs font-semibold text-muted">
+                        {liveDelta > 0 && (
+                          <span
+                            className={`px-1.5 py-0.5 rounded-md text-[10px] font-extrabold ${
+                              member.isMe
+                                ? 'bg-primary-soft text-primary-ink'
+                                : 'bg-reward-soft text-reward-ink'
+                            }`}
+                          >
+                            +{metric === 'minutes' ? `${liveDelta}分` : `${liveDelta}pt`}
+                          </span>
+                        )}
+                        <span className="text-xs font-bold text-muted">
                           {progressPct}%
                         </span>
                       </div>
@@ -1273,33 +1373,37 @@ export default function RankingView({
 
                     {/* 2列目：ワイドレーストラック＋進行バー＋アバター */}
                     <div className="relative h-12 flex items-center px-4 sm:px-5">
-                      {/* START / 50% / GOAL ガイドライン */}
+                      {/* START / 50% / 目標 / 上限 ガイドライン */}
                       <div className="absolute inset-y-1 left-4 right-4 sm:left-5 sm:right-5 pointer-events-none">
                         {/* START ライン */}
                         <div className="absolute inset-y-0 left-0 border-l-2 border-line-strong/80" />
-                        {/* 50% ライン */}
-                        <div className="absolute inset-y-0 left-1/2 border-l border-dashed border-line-strong/60" />
+                        {/* 50% 中間ライン（目標ラインと重ならない場合のみ描画） */}
+                        {(!isGoalExceeded || goalPct !== 50) && (
+                          <div className="absolute inset-y-0 left-1/2 border-l border-dashed border-line-strong/65" />
+                        )}
                         {/* 目標超過時の目標ライン（goalValue < scaleValue のとき） */}
                         {isGoalExceeded && (
                           <div
-                            className="absolute inset-y-0 border-l border-dashed border-amber-500/60"
-                            style={{ left: `${Math.round((goalValue / scaleValue) * 100)}%` }}
+                            className="absolute inset-y-0 border-l-2 border-dashed border-amber-500/75"
+                            style={{ left: `${goalPct}%` }}
                             title={`目標 ${formatMetric(goalValue)}`}
                           />
                         )}
                         {/* GOAL / 上限ライン */}
                         <div
                           className={`absolute inset-y-0 right-0 border-l-2 ${
-                            reachedGoal ? 'border-amber-500/80' : 'border-line-strong/80'
+                            !isGoalExceeded && reachedGoal
+                              ? 'border-amber-500/85'
+                              : 'border-line-strong/80'
                           }`}
                         />
                       </div>
 
-                      {/* 落ち着いたダークトラックレール + 明確なソリッド進行ライン */}
+                      {/* 落ち着いたトラックレール + 明確なソリッド進行ライン */}
                       <div className="relative w-full h-2.5 rounded-full bg-card-subtle">
                         <motion.div
                           initial={{ width: 0 }}
-                          animate={{ width: `${progressPct}%` }}
+                          animate={{ width: `${barPct}%` }}
                           transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1] }}
                           className={`absolute inset-y-0 left-0 rounded-full ${isLiveRunning ? 'live-shimmer' : ''}`}
                           style={{ backgroundColor: barColor }}
@@ -1308,14 +1412,15 @@ export default function RankingView({
                         {/* 進行位置のプレイヤーアバター */}
                         <motion.div
                           initial={{ left: '0%' }}
-                          animate={{ left: `${progressPct}%` }}
+                          animate={{ left: `${barPct}%` }}
                           transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1] }}
                           className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 z-10"
                         >
                           <div className="relative">
                             {isLiveRunning && (
                               <span
-                                className="live-ping absolute -inset-1 rounded-full border-2 border-reward/70 pointer-events-none"
+                                className="live-avatar-glow absolute inset-0 rounded-full pointer-events-none"
+                                style={{ ['--glow-color' as string]: barColor }}
                                 aria-hidden="true"
                               />
                             )}
@@ -1335,32 +1440,38 @@ export default function RankingView({
                               size="md"
                               shape="circle"
                               className={`!ring-2 ${
-                                isLiveRunning
-                                  ? '!ring-reward'
+                                isLivePaused
+                                  ? '!ring-amber-500/80'
                                   : member.isMe
                                     ? '!ring-primary'
-                                    : isFirst
-                                      ? '!ring-amber-500'
-                                      : '!ring-reward/70'
+                                    : isLiveRunning
+                                      ? '!ring-reward'
+                                      : isFirst
+                                        ? '!ring-amber-500'
+                                        : '!ring-reward/70'
                               } shadow-card`}
                             />
-                            {reachedGoal && (
-                              <span
-                                className="absolute -bottom-0.5 -right-0.5 size-4 rounded-full bg-amber-500 text-white grid place-items-center ring-2 ring-card"
-                                title={`目標 ${formatMetric(goalValue)} 達成`}
-                              >
-                                <Check size={9} strokeWidth={3} />
-                              </span>
-                            )}
                           </div>
                         </motion.div>
                       </div>
                     </div>
 
-                    {/* 3列目：スコア・進捗率・相手との差 */}
-                    <div className="flex sm:flex-col sm:items-end justify-between gap-1 font-numbers tabular-nums">
-                      <div className="hidden sm:flex items-baseline gap-2">
-                        <span className={`text-lg font-extrabold tracking-tight ${member.isMe ? 'text-primary' : 'text-ink'}`}>
+                    {/* 3列目：ポイント（または時間）と進捗率 */}
+                    <div className="hidden sm:flex flex-col items-end justify-center gap-0.5 font-numbers tabular-nums">
+                      <div className="flex items-baseline gap-1.5">
+                        {liveDelta > 0 && (
+                          <span
+                            className={`px-1.5 py-0.5 rounded-md text-[10px] font-extrabold self-center ${
+                              member.isMe
+                                ? 'bg-primary-soft text-primary-ink'
+                                : 'bg-reward-soft text-reward-ink'
+                            }`}
+                            title="今回のライブ計測による加算"
+                          >
+                            +{metric === 'minutes' ? `${liveDelta}分` : `${liveDelta}pt`}
+                          </span>
+                        )}
+                        <span className={`text-lg font-extrabold tracking-tight leading-none ${member.isMe ? 'text-primary' : 'text-ink'}`}>
                           {metric === 'minutes' ? (
                             formatDuration(member.weekMinutes)
                           ) : (
@@ -1375,29 +1486,16 @@ export default function RankingView({
                             </>
                           )}
                         </span>
-                        <span className="text-xs font-bold text-muted">
-                          {progressPct}%
-                        </span>
                       </div>
 
-                      <div className="flex items-center gap-2 text-xs">
-                        {laneGap ? (
-                          <span
-                            className={`font-semibold ${
-                              isFirst && !member.isTied
-                                ? 'text-amber-600 dark:text-amber-400'
-                                : 'text-muted'
-                            }`}
-                          >
-                            {laneGap}
-                          </span>
-                        ) : (
-                          <span className="text-muted">
-                            {metric === 'points'
-                              ? formatDuration(member.weekMinutes)
-                              : `${member.weekPoints}pt`}
-                          </span>
-                        )}
+                      <div className="flex items-center gap-2 text-xs font-semibold text-muted">
+                        <span>
+                          {metric === 'points'
+                            ? formatDuration(member.weekMinutes)
+                            : `${member.weekPoints}pt`}
+                        </span>
+                        <span className="text-line-strong" aria-hidden="true">·</span>
+                        <span className="font-bold text-ink/75">{progressPct}%</span>
                       </div>
                     </div>
                   </div>
@@ -1482,6 +1580,25 @@ export default function RankingView({
               const isSelected = isDetailView && week.weekStart === detailWeekStart;
               const hasRecords = week.totalPoints > 0 && Boolean(week.winner);
 
+              if (!hasRecords) {
+                return (
+                  <div
+                    key={week.weekStart}
+                    className="w-full px-4 sm:px-5 py-2.5 flex items-center justify-between gap-3"
+                  >
+                    <div className="flex items-center gap-2 min-w-[116px] sm:min-w-[140px] shrink-0">
+                      <span className="text-xs sm:text-sm font-semibold font-numbers tabular-nums text-muted">
+                        {formatWeekRange(week.weekStart)}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2 flex-1 min-w-0">
+                      <span className="text-xs font-medium text-muted">記録なし</span>
+                    </div>
+                    <span className="text-xs text-muted shrink-0" aria-hidden="true">—</span>
+                  </div>
+                );
+              }
+
               return (
                 <button
                   key={week.weekStart}
@@ -1491,9 +1608,7 @@ export default function RankingView({
                     setRankDelta(0);
                     window.scrollTo({ top: 0, behavior: 'smooth' });
                   }}
-                  className={`group w-full text-left px-4 sm:px-5 flex items-center justify-between gap-3 transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-inset focus-visible:outline-primary ${
-                    hasRecords ? 'py-3.5' : 'py-2.5'
-                  } ${
+                  className={`group w-full text-left px-4 sm:px-5 py-3.5 flex items-center justify-between gap-3 transition-colors cursor-pointer active:bg-card-subtle focus-visible:outline-2 focus-visible:outline-inset focus-visible:outline-primary ${
                     isSelected
                       ? 'bg-primary-soft/35'
                       : 'hover:bg-card-subtle/60'
@@ -1501,11 +1616,7 @@ export default function RankingView({
                 >
                   {/* 期間（視認性を維持） */}
                   <div className="flex items-center gap-2 min-w-[116px] sm:min-w-[140px] shrink-0">
-                    <span
-                      className={`text-xs sm:text-sm font-bold font-numbers tabular-nums ${
-                        hasRecords ? 'text-ink' : 'text-muted'
-                      }`}
-                    >
+                    <span className="text-xs sm:text-sm font-bold font-numbers tabular-nums text-ink">
                       {formatWeekRange(week.weekStart)}
                     </span>
                     {isSelected && (
@@ -1515,9 +1626,9 @@ export default function RankingView({
                     )}
                   </div>
 
-                  {/* 1位の結果（記録ありは強調、なしは控えめだが読みやすいコントラスト） */}
+                  {/* 1位の結果 */}
                   <div className="flex items-center gap-2 flex-1 min-w-0">
-                    {hasRecords && week.winner ? (
+                    {week.winner && (
                       <>
                         <Crown size={14} className="text-amber-500 shrink-0" aria-hidden="true" />
                         <StudentAvatar
@@ -1535,8 +1646,6 @@ export default function RankingView({
                           {week.winner.weekPoints}pt
                         </span>
                       </>
-                    ) : (
-                      <span className="text-xs text-muted/80">記録なし</span>
                     )}
                   </div>
 
@@ -1546,7 +1655,7 @@ export default function RankingView({
                       <span
                         className={`text-xs sm:text-sm font-extrabold ${
                           week.myRank === 1
-                            ? 'text-amber-500 dark:text-amber-400'
+                            ? 'text-amber-600 dark:text-amber-400'
                             : 'text-primary'
                         }`}
                       >

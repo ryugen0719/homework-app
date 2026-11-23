@@ -22,6 +22,7 @@ import CountUp from '../components/CountUp/CountUp';
 import AchievementDeck from '../components/AchievementDeck';
 import GlideSelect from '../components/GlideSelect/GlideSelect';
 import { formatDuration } from '../lib/format-duration';
+import { classifySubject, OTHER_SUBJECT, SUBJECT_RULES } from '../lib/subject-classifier';
 
 interface StatsViewProps {
   entries: Record<string, DayEntry>;
@@ -39,15 +40,6 @@ interface SubjectStat {
   minutes: number;
   count: number;
 }
-
-const SUBJECT_RULES = [
-  { name: '算数・数学', color: '#3B82F6', keywords: ['算数', '数学', '計算', '図形', 'かけ算', 'わり算', '方程式', 'ドリル', '数研'] },
-  { name: '国語・読書', color: '#EF4444', keywords: ['国語', '漢字', '読書', '作文', '音読', '本', '文学', '現代文', '古文'] },
-  { name: '英語', color: '#10B981', keywords: ['英語', '英単語', 'リスニング', '文法', 'english', '単語'] },
-  { name: '理科', color: '#8B5CF6', keywords: ['理科', '実験', '生物', '化学', '物理', '地学', '観察'] },
-  { name: '社会', color: '#F59E0B', keywords: ['社会', '歴史', '地理', '公民', '日本史', '世界史', '地図'] },
-  { name: '宿題・ワーク', color: '#EC4899', keywords: ['宿題', 'ワーク', 'プリント', '予習', '復習', '課題'] },
-];
 
 function offsetDate(dateStr: string, days: number): string {
   const d = new Date(`${dateStr}T12:00:00+09:00`);
@@ -216,24 +208,13 @@ export default function StatsView({
     SUBJECT_RULES.forEach((r) => {
       counts[r.name] = { minutes: 0, count: 0, color: r.color };
     });
-    counts['その他'] = { minutes: 0, count: 0, color: '#9CA3AF' };
+    counts[OTHER_SUBJECT.name] = { minutes: 0, count: 0, color: OTHER_SUBJECT.color };
 
     periodEntries.forEach((dayEntry) => {
       dayEntry.sessions?.forEach((session) => {
-        const text = session.content.toLowerCase();
-        let matched = false;
-        for (const rule of SUBJECT_RULES) {
-          if (rule.keywords.some((kw) => text.includes(kw.toLowerCase()))) {
-            counts[rule.name].minutes += session.minutes || 0;
-            counts[rule.name].count += 1;
-            matched = true;
-            break;
-          }
-        }
-        if (!matched) {
-          counts['その他'].minutes += session.minutes || 0;
-          counts['その他'].count += 1;
-        }
+        const subject = classifySubject(session.content);
+        counts[subject.name].minutes += session.minutes || 0;
+        counts[subject.name].count += 1;
       });
     });
 

@@ -7,6 +7,9 @@ import {
   BadgeCheck,
   Camera,
   Check,
+  Eye,
+  EyeOff,
+  KeyRound,
   LoaderCircle,
   Moon,
   PencilLine,
@@ -73,11 +76,16 @@ export default function ProfileModal({
   onClose,
   onUpdated,
 }: ProfileModalProps) {
-  const [mode, setMode] = useState<'view' | 'edit'>('view');
+  const [mode, setMode] = useState<'view' | 'edit' | 'password'>('view');
   const [displayName, setDisplayName] = useState(student.displayName || student.name);
   const [color, setColor] = useState(student.color || STUDENT_COLOR_OPTIONS[0]);
   const [avatarUrl, setAvatarUrl] = useState(student.avatarUrl || '');
   const [rankingOptOut, setRankingOptOut] = useState(Boolean(student.rankingOptOut));
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showCurrentPw, setShowCurrentPw] = useState(false);
+  const [showNewPw, setShowNewPw] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [togglingRanking, setTogglingRanking] = useState(false);
@@ -223,8 +231,62 @@ export default function ProfileModal({
     setColor(student.color || STUDENT_COLOR_OPTIONS[0]);
     setAvatarUrl(student.avatarUrl || '');
     setRankingOptOut(Boolean(student.rankingOptOut));
+    setCurrentPassword('');
+    setNewPassword('');
+    setConfirmPassword('');
+    setShowCurrentPw(false);
+    setShowNewPw(false);
     setError('');
     setMode('view');
+  };
+
+  const handleSavePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmedCurrent = currentPassword.trim();
+    const trimmedNext = newPassword.trim();
+    const trimmedConfirm = confirmPassword.trim();
+
+    if (!trimmedCurrent) {
+      setError('現在のパスワードを入力してください');
+      return;
+    }
+    if (trimmedNext.length < 4 || trimmedNext.length > 20) {
+      setError('新しいパスワードは4〜20文字で入力してください');
+      return;
+    }
+    if (trimmedNext !== trimmedConfirm) {
+      setError('新しいパスワード（確認）が一致しません');
+      return;
+    }
+
+    setSaving(true);
+    setError('');
+    try {
+      const res = await fetch('/api/students', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-app-token': token,
+        },
+        body: JSON.stringify({
+          studentId: student.id,
+          currentPassword: trimmedCurrent,
+          password: trimmedNext,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        setError(json.error || 'パスワードの変更に失敗しました');
+        return;
+      }
+      playAppSound('heart');
+      onUpdated({}, 'パスワードを変更しました');
+      resetEditDraft();
+    } catch {
+      setError('通信エラーが発生しました');
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -264,8 +326,8 @@ export default function ProfileModal({
               }}
             />
 
-            {/* 編集モード時の戻るボタン（左上） */}
-            {mode === 'edit' && (
+            {/* 編集・PW変更モード時の戻るボタン（左上） */}
+            {mode !== 'view' && (
               <button
                 type="button"
                 onClick={resetEditDraft}
@@ -507,8 +569,146 @@ export default function ProfileModal({
                   />
                 </button>
               </div>
+
+              {/* ログインパスワード変更 */}
+              <div className="flex items-center justify-between gap-3 px-3 py-2.5 rounded-2xl bg-card-subtle/50 border border-line/60">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <span className="size-8 rounded-xl bg-card border border-line grid place-items-center text-ink shrink-0">
+                    <KeyRound size={15} />
+                  </span>
+                  <div className="min-w-0">
+                    <p className="m-0 text-xs font-bold text-ink">ログインパスワード</p>
+                    <p className="m-0 text-[11px] text-muted">
+                      自分のパスワードを変更する
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setError('');
+                    setCurrentPassword('');
+                    setNewPassword('');
+                    setConfirmPassword('');
+                    setMode('password');
+                  }}
+                  className="px-3 py-1.5 rounded-full text-xs font-bold bg-card border border-line hover:border-primary/50 text-ink transition-all cursor-pointer shrink-0"
+                >
+                  変更する
+                </button>
+              </div>
             </div>
           </div>
+        ) : mode === 'password' ? (
+          /* パスワード変更モード */
+          <form onSubmit={handleSavePassword} className="px-5 pt-3 pb-5 space-y-4">
+            <div className="text-center">
+              <h3 id="profile-modal-title" className="m-0 text-base font-extrabold text-ink">
+                パスワードを変更
+              </h3>
+              <p className="m-0 mt-1 text-xs text-muted">
+                4〜20文字で設定できます。変更後は先生も確認できます。
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-muted mb-1.5" htmlFor="student-current-pw">
+                現在のパスワード
+              </label>
+              <div className="relative">
+                <input
+                  id="student-current-pw"
+                  type={showCurrentPw ? 'text' : 'password'}
+                  autoComplete="current-password"
+                  maxLength={20}
+                  value={currentPassword}
+                  onChange={(e) => setCurrentPassword(e.target.value)}
+                  placeholder="現在のパスワードを入力"
+                  className="w-full pl-3.5 pr-10 py-2 text-sm font-mono rounded-xl border border-line bg-card text-ink focus:outline-none focus:border-primary"
+                  required
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowCurrentPw((v) => !v)}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-muted hover:text-ink cursor-pointer"
+                  aria-label={showCurrentPw ? '現在のパスワードを隠す' : '現在のパスワードを表示'}
+                >
+                  {showCurrentPw ? <EyeOff size={15} /> : <Eye size={15} />}
+                </button>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-muted mb-1.5" htmlFor="student-new-pw">
+                新しいパスワード（4〜20文字）
+              </label>
+              <div className="relative">
+                <input
+                  id="student-new-pw"
+                  type={showNewPw ? 'text' : 'password'}
+                  autoComplete="new-password"
+                  minLength={4}
+                  maxLength={20}
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  placeholder="新しいパスワードを入力"
+                  className="w-full pl-3.5 pr-10 py-2 text-sm font-mono rounded-xl border border-line bg-card text-ink focus:outline-none focus:border-primary"
+                  required
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowNewPw((v) => !v)}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-muted hover:text-ink cursor-pointer"
+                  aria-label={showNewPw ? '新しいパスワードを隠す' : '新しいパスワードを表示'}
+                >
+                  {showNewPw ? <EyeOff size={15} /> : <Eye size={15} />}
+                </button>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-muted mb-1.5" htmlFor="student-confirm-pw">
+                新しいパスワード（確認）
+              </label>
+              <input
+                id="student-confirm-pw"
+                type={showNewPw ? 'text' : 'password'}
+                autoComplete="new-password"
+                minLength={4}
+                maxLength={20}
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                placeholder="もう一度入力してください"
+                className="w-full px-3.5 py-2 text-sm font-mono rounded-xl border border-line bg-card text-ink focus:outline-none focus:border-primary"
+                required
+              />
+            </div>
+
+            {error && (
+              <p className="text-xs font-semibold text-danger bg-danger/10 border border-danger/20 rounded-xl px-3 py-2">
+                {error}
+              </p>
+            )}
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-line/60">
+              <button
+                type="button"
+                onClick={resetEditDraft}
+                disabled={saving}
+                className="px-4 py-2 text-xs font-bold rounded-full border border-line text-muted hover:text-ink cursor-pointer"
+              >
+                キャンセル
+              </button>
+              <button
+                type="submit"
+                disabled={saving || !currentPassword.trim() || newPassword.trim().length < 4 || !confirmPassword.trim()}
+                className="inline-flex items-center gap-1.5 px-5 py-2 text-xs font-bold rounded-full bg-primary text-white hover:bg-primary-hover active:scale-95 transition-all shadow-subtle cursor-pointer disabled:opacity-50"
+              >
+                {saving ? <LoaderCircle size={14} className="animate-spin" /> : <Check size={14} />}
+                <span>{saving ? '変更中…' : 'パスワードを変更'}</span>
+              </button>
+            </div>
+          </form>
         ) : (
           /* プロフィール編集モード */
           <form onSubmit={handleSave} className="px-5 pt-3 pb-5 space-y-4">

@@ -404,8 +404,25 @@ h4 {
   100% { background-position: 200% 0; }
 }
 
+@keyframes live-avatar-glow {
+  0%, 100% {
+    box-shadow:
+      0 0 0 2px color-mix(in srgb, var(--glow-color, var(--reward)) 26%, transparent),
+      0 0 8px 1px color-mix(in srgb, var(--glow-color, var(--reward)) 24%, transparent);
+  }
+  50% {
+    box-shadow:
+      0 0 0 4px color-mix(in srgb, var(--glow-color, var(--reward)) 16%, transparent),
+      0 0 14px 3px color-mix(in srgb, var(--glow-color, var(--reward)) 40%, transparent);
+  }
+}
+
 .live-ping {
   animation: live-ping 1.8s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+
+.live-avatar-glow {
+  animation: live-avatar-glow 2.8s ease-in-out infinite;
 }
 
 .live-shimmer {
