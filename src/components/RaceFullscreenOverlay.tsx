@@ -579,13 +579,37 @@ export default function RaceFullscreenOverlay({
                               transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1] }}
                               className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 z-10"
                             >
-                              <div className="relative">
+                              <div className="relative size-10 grid place-items-center">
                                 {isRunning && (
-                                  <span
-                                    className="live-avatar-glow absolute inset-0 rounded-full pointer-events-none"
-                                    style={{ ['--glow-color' as string]: barColor }}
-                                    aria-hidden="true"
-                                  />
+                                  <>
+                                    <span
+                                      className="pointer-events-none absolute left-1 top-1/2 -translate-y-1/2"
+                                      aria-hidden="true"
+                                    >
+                                      {[
+                                        { y: '-6px', delay: '0s', size: 'size-[5px]' },
+                                        { y: '5px', delay: '0.42s', size: 'size-1' },
+                                        { y: '-2px', delay: '0.85s', size: 'size-[4.5px]' },
+                                        { y: '2px', delay: '1.28s', size: 'size-[3.5px]' },
+                                      ].map((p, idx) => (
+                                        <span
+                                          key={idx}
+                                          className={`live-trail-particle absolute left-0 top-0 rounded-full ${p.size}`}
+                                          style={{
+                                            backgroundColor: barColor,
+                                            color: barColor,
+                                            animationDelay: p.delay,
+                                            ['--trail-y' as string]: p.y,
+                                          }}
+                                        />
+                                      ))}
+                                    </span>
+                                    <span
+                                      className="live-avatar-glow absolute inset-0 rounded-full pointer-events-none"
+                                      style={{ ['--glow-color' as string]: barColor }}
+                                      aria-hidden="true"
+                                    />
+                                  </>
                                 )}
                                 {isFirst && (
                                   <span
