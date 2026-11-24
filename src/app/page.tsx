@@ -52,6 +52,8 @@ import { useLiveTimer } from '../hooks/useLiveTimer';
 import TeacherReviewModal from '../components/TeacherReviewModal';
 import TeacherPasswordModal from '../components/TeacherPasswordModal';
 import { formatDuration, formatDurationCompact } from '../lib/format-duration';
+import { calculateSavePointsBreakdown, PHOTO_DAILY_BONUS } from '../lib/points';
+import confetti from 'canvas-confetti';
 import {
   getSoundMuted,
   playAppSound,
@@ -60,7 +62,7 @@ import {
   setAppSoundRole,
 } from '../components/sounds';
 
-type StudySession = { id: string; content: string; minutes?: number; evidencePath?: string; createdAt?: string; updatedAt?: string };
+type StudySession = { id: string; content: string; minutes?: number; evidencePath?: string; source?: 'manual' | 'live'; createdAt?: string; updatedAt?: string };
 type Review = { comment?: string; reviewedAt?: string };
 type DayEntry = { date: string; sessions: StudySession[]; review?: Review };
 type Draft = { id: string; content: string; minutes: string };
@@ -471,40 +473,25 @@ export default function Home() {
   const monthReviewedCount = monthEntries.filter((item) => item.review?.reviewedAt).length;
   const monthTotalMinutes = monthEntries.reduce((sum, item) => sum + item.sessions.reduce((daySum, session) => daySum + (session.minutes || 0), 0), 0);
 
-  // 保存前ポイント獲得予告 (Preview)
+  // 保存前ポイント＆ボーナス獲得予告 (Preview) — 共通ロジック src/lib/points.ts と完全一致
   const pointPreview = useMemo(() => {
     if (role !== '生徒') return null;
     const minutesVal = Number(draft.minutes);
     if (!Number.isInteger(minutesVal) || minutesVal <= 0) return null;
 
-    // 現在のその日の学習分数（編集中ならそのセッションを除外）
-    const otherSessionsMinutes = sessions
-      .filter((s) => s.id !== draft.id)
-      .reduce((sum, s) => sum + (s.minutes || 0), 0);
-    const newTotalMinutes = otherSessionsMinutes + minutesVal;
-
-    // もし旧合計が10分未満で、今回で10分以上になるなら継続ボーナス発生
-    let streakBonus = 0;
-    if (otherSessionsMinutes < 10 && newTotalMinutes >= 10) {
-      const recordDates = Object.keys(entries).filter(
-        (d) => d !== day && (entries[d]?.sessions?.reduce((sum, s) => sum + (s.minutes || 0), 0) || 0) >= 10
-      );
-      let streak = 1;
-      let checkDate = offsetDate(day, -1);
-      while (recordDates.includes(checkDate)) {
-        streak++;
-        checkDate = offsetDate(checkDate, -1);
-      }
-      streakBonus = Math.min(5, streak) * 5;
+    const historyByDate: Record<string, StudySession[]> = {};
+    for (const [d, item] of Object.entries(entries)) {
+      historyByDate[d] = item.sessions || [];
     }
 
-    return {
-      timePoints: minutesVal,
-      streakBonus,
-      totalPoints: minutesVal + streakBonus,
-      isFirstOver10: otherSessionsMinutes < 10 && newTotalMinutes >= 10,
-    };
-  }, [draft.minutes, draft.id, sessions, role, day, entries]);
+    return calculateSavePointsBreakdown({
+      allHistory: historyByDate,
+      targetDate: day,
+      newSessionMinutes: minutesVal,
+      editingSessionId: draft.id || undefined,
+      isLiveSource: Boolean(pendingLiveMeta && !draft.id),
+    });
+  }, [draft.minutes, draft.id, role, day, entries, pendingLiveMeta]);
 
   // カレンダーのマス目を生成（月曜始まり）
   const calendarCells = useMemo(() => {
@@ -959,9 +946,33 @@ export default function Home() {
       });
       const response = await put({ action: 'session-save', date: day, id: session.id, content: session.content, ...(session.minutes ? { minutes: session.minutes } : {}), evidencePath: blob.pathname });
       if (!response?.ok) throw new Error();
+      const hadPhotoBefore = sessions.some((item) => Boolean(item.evidencePath));
       updateDay(day, { sessions: sessions.map((item) => item.id === session.id ? { ...item, evidencePath: blob.pathname } : item) });
-      playAppSound('uplink');
-      notify('写真を保存しました');
+      if (!hadPhotoBefore && role === '生徒') {
+        playAppSound('treasure');
+        toast.success(`写真提出ボーナス +${PHOTO_DAILY_BONUS}pt 獲得！`, {
+          description: '今日の学習ノートの写真を提出しました',
+          duration: 4500,
+        });
+        if (
+          typeof window !== 'undefined' &&
+          !window.matchMedia('(prefers-reduced-motion: reduce)').matches
+        ) {
+          void confetti({
+            particleCount: 28,
+            spread: 52,
+            startVelocity: 24,
+            scalar: 0.85,
+            ticks: 130,
+            origin: { y: 0.2 },
+            colors: ['#00A86B', '#34D399', '#0057FF', '#F59E0B'],
+            disableForReducedMotion: true,
+          });
+        }
+      } else {
+        playAppSound('uplink');
+        notify('写真を保存しました');
+      }
     } catch {
       setError('画像を保存できませんでした。もう一度お試しください。');
     } finally {

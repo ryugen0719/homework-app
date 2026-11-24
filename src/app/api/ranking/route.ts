@@ -15,6 +15,7 @@ import {
   validDate,
   weekStartFor,
 } from '../../../lib/homework-server';
+import { calculateRangePointsSummary } from '../../../lib/points';
 
 function json(data: unknown, status = 200) {
   return NextResponse.json(data, {
@@ -39,67 +40,6 @@ type RankingPeriod =
   | 'last-30'
   | 'all'
   | 'custom';
-
-function calculateRangePoints(
-  allHistory: Record<string, ReturnType<typeof sessionsFromDay>>,
-  rangeStart: string,
-  rangeEnd: string,
-) {
-  const sortedDates = Object.keys(allHistory)
-    .filter((d) => validDate(d))
-    .sort();
-
-  const dailyBonusMap: Record<string, number> = {};
-  const dailyPhotoBonusMap: Record<string, number> = {};
-  const dailyMinutesMap: Record<string, number> = {};
-
-  let currentStreak = 0;
-  let prevDate = '';
-
-  for (const date of sortedDates) {
-    const sessions = allHistory[date] || [];
-    const dayMinutes = sessions.reduce((sum, s) => sum + (s.minutes || 0), 0);
-    dailyMinutesMap[date] = dayMinutes;
-
-    if (sessions.some((s) => Boolean(s.evidencePath))) {
-      dailyPhotoBonusMap[date] = 5;
-    }
-
-    if (dayMinutes >= 10) {
-      if (prevDate && offsetDateJst(prevDate, 1) === date) {
-        currentStreak += 1;
-      } else {
-        currentStreak = 1;
-      }
-      prevDate = date;
-      dailyBonusMap[date] = Math.min(5, currentStreak) * 5;
-    }
-  }
-
-  let totalMinutes = 0;
-  let totalStreakBonus = 0;
-  let totalPhotoBonus = 0;
-  let activeDays = 0;
-
-  for (const date of sortedDates) {
-    if (date < rangeStart || date > rangeEnd) continue;
-    const mins = dailyMinutesMap[date] || 0;
-    const hasSessions = (allHistory[date]?.length || 0) > 0;
-    if (hasSessions) activeDays += 1;
-    totalMinutes += mins;
-    totalStreakBonus += dailyBonusMap[date] || 0;
-    totalPhotoBonus += dailyPhotoBonusMap[date] || 0;
-  }
-
-  return {
-    weekMinutes: totalMinutes,
-    weekStreakBonus: totalStreakBonus,
-    weekPhotoBonus: totalPhotoBonus,
-    weekPoints: totalMinutes + totalStreakBonus + totalPhotoBonus,
-    currentStreak,
-    activeDays,
-  };
-}
 
 /**
  * 先生または生徒が所属するグループ、およびそのグループの週次ランキングを取得
@@ -406,8 +346,10 @@ export async function GET(request: NextRequest) {
           weekMinutes: pointsSummary.weekMinutes,
           weekStreakBonus: pointsSummary.weekStreakBonus,
           weekPhotoBonus: pointsSummary.weekPhotoBonus,
+          weekLiveBonus: pointsSummary.weekLiveBonus,
           weekPoints: pointsSummary.weekPoints,
           currentStreak: pointsSummary.currentStreak,
+          currentMultiplier: pointsSummary.currentMultiplier,
           isMe: m.isMe,
           isOptedOut: m.isOptedOut,
           liveTimer: m.liveTimer,
@@ -420,7 +362,7 @@ export async function GET(request: NextRequest) {
       ? computeWeekRanking(targetWeekStart)
       : assignRanks(
           validMembers.map((m) => {
-            const summary = calculateRangePoints(m.history, rangeStart, rangeEnd);
+            const summary = calculateRangePointsSummary(m.history, rangeStart, rangeEnd);
             return {
               studentId: m.studentId,
               displayName: m.displayName,
@@ -430,8 +372,10 @@ export async function GET(request: NextRequest) {
               weekMinutes: summary.weekMinutes,
               weekStreakBonus: summary.weekStreakBonus,
               weekPhotoBonus: summary.weekPhotoBonus,
+              weekLiveBonus: summary.weekLiveBonus,
               weekPoints: summary.weekPoints,
               currentStreak: summary.currentStreak,
+              currentMultiplier: summary.currentMultiplier,
               isMe: m.isMe,
               isOptedOut: m.isOptedOut,
               liveTimer: m.liveTimer,

@@ -23,6 +23,7 @@ import {
   Play,
   RefreshCw,
   Target,
+  Timer,
 } from 'lucide-react';
 import StudentAvatar from '../components/StudentAvatar';
 import CountUp from '../components/CountUp/CountUp';
@@ -70,8 +71,10 @@ interface RankingMember {
   weekMinutes: number;
   weekStreakBonus: number;
   weekPhotoBonus?: number;
+  weekLiveBonus?: number;
   weekPoints: number;
   currentStreak?: number;
+  currentMultiplier?: number;
   rank: number;
   isMe?: boolean;
   isOptedOut?: boolean;
@@ -770,7 +773,10 @@ export default function RankingView({
   const showMidpointLabel = !isGoalExceeded || Math.abs(goalPct - 50) >= 20;
   const leader = standings[0] ?? null;
   const second = standings[1] ?? null;
-  const myBonusTotal = (myStanding?.weekStreakBonus || 0) + (myStanding?.weekPhotoBonus || 0);
+  const myBonusTotal =
+    (myStanding?.weekStreakBonus || 0) +
+    (myStanding?.weekPhotoBonus || 0) +
+    (myStanding?.weekLiveBonus || 0);
   const myGoalReached = Boolean(myStanding && myStanding.hasScore && myStanding.metricValue >= goalValue);
 
   const formatMetric = (val: number) =>
@@ -1186,23 +1192,30 @@ export default function RankingView({
 
         {/* 開閉式ルールガイド */}
         {showRules && (
-          <div className="px-4 py-3 rounded-2xl bg-card-subtle/75 space-y-2 text-xs">
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+          <div className="px-4 py-3 rounded-2xl bg-card-subtle/75 space-y-2.5 text-xs">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
               <div className="flex items-center gap-2 text-ink">
                 <Clock size={14} className="text-primary shrink-0" />
                 <span>勉強時間: <strong className="font-numbers">1分 = 1pt</strong></span>
               </div>
               <div className="flex items-center gap-2 text-ink">
                 <Flame size={14} className="text-amber-500 shrink-0" />
-                <span>連続学習（1日10分+）: <strong className="font-numbers">+5〜+25pt/日</strong></span>
+                <span>
+                  連続ブースト（1日10分+）:{' '}
+                  <strong className="font-numbers">2日 ×1.1 / 3日 ×1.2 / 5日〜 ×1.3</strong>
+                </span>
               </div>
               <div className="flex items-center gap-2 text-ink">
                 <Camera size={14} className="text-reward shrink-0" />
-                <span>写真提出: <strong className="font-numbers">+5pt/日</strong></span>
+                <span>写真提出: <strong className="font-numbers">+3pt/日</strong></span>
+              </div>
+              <div className="flex items-center gap-2 text-ink">
+                <Timer size={14} className="text-emerald-500 shrink-0" />
+                <span>ライブ計測（15分+）: <strong className="font-numbers">+3pt/日</strong></span>
               </div>
             </div>
             <p className="m-0 text-[11px] font-medium text-muted">
-              合計ポイント ＝ 勉強時間pt ＋ 連続学習ボーナス ＋ 写真提出ボーナス（目標 {formatMetric(goalValue)} は目安の到達ラインです）
+              連続ブーストは 1日上限 120分まで適用・1日休みなら1段階ダウンで維持（2日連続休みでリセット）。目標 {formatMetric(goalValue)} は目安の到達ラインです。
             </p>
           </div>
         )}
@@ -1292,21 +1305,36 @@ export default function RankingView({
                   {myStanding.weekStreakBonus > 0 && (
                     <span
                       className="inline-flex items-center gap-1.5"
-                      title="1日10分以上の連続学習によるボーナス（+5〜+25pt/日）"
+                      title="1日10分以上の連続学習による倍率ブースト（×1.1〜×1.3・上限120分/日・1日セーフティ付き）"
                     >
                       <Flame size={14} className="text-amber-500 shrink-0" aria-hidden="true" />
-                      <span>連続学習</span>
+                      <span>
+                        連続ブースト
+                        {(myStanding.currentMultiplier || 1) > 1
+                          ? `（×${(myStanding.currentMultiplier || 1).toFixed(1)}）`
+                          : ''}
+                      </span>
                       <strong className="text-ink font-bold">+{myStanding.weekStreakBonus}pt</strong>
                     </span>
                   )}
                   {(myStanding.weekPhotoBonus || 0) > 0 && (
                     <span
                       className="inline-flex items-center gap-1.5"
-                      title="写真付き記録の提出によるボーナス（+5pt/日）"
+                      title="写真付き記録の提出によるボーナス（+3pt/日）"
                     >
                       <Camera size={14} className="text-reward shrink-0" aria-hidden="true" />
                       <span>写真提出</span>
                       <strong className="text-ink font-bold">+{myStanding.weekPhotoBonus}pt</strong>
+                    </span>
+                  )}
+                  {(myStanding.weekLiveBonus || 0) > 0 && (
+                    <span
+                      className="inline-flex items-center gap-1.5"
+                      title="ライブタイマーで15分以上計測した記録によるボーナス（+3pt/日）"
+                    >
+                      <Timer size={14} className="text-emerald-500 shrink-0" aria-hidden="true" />
+                      <span>ライブ計測</span>
+                      <strong className="text-ink font-bold">+{myStanding.weekLiveBonus}pt</strong>
                     </span>
                   )}
                 </>

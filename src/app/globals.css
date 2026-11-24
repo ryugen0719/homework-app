@@ -474,6 +474,61 @@ h4 {
   animation: live-shimmer 2.2s linear infinite;
 }
 
+/* Live Pace Track (拡張一覧トラック) seamless 45-deg forward-motion animations */
+@keyframes track-flow-tile {
+  0% {
+    background-position: 0 0;
+  }
+  100% {
+    background-position: 32px 0;
+  }
+}
+
+@keyframes track-head-pulse {
+  0%, 100% {
+    transform: translateY(-50%) scale(0.9);
+    opacity: 0.78;
+  }
+  50% {
+    transform: translateY(-50%) scale(1.22);
+    opacity: 1;
+  }
+}
+
+.track-flow-bar {
+  background-image: linear-gradient(
+    -45deg,
+    rgba(255, 255, 255, 0.22) 25%,
+    transparent 25%,
+    transparent 50%,
+    rgba(255, 255, 255, 0.22) 50%,
+    rgba(255, 255, 255, 0.22) 75%,
+    transparent 75%,
+    transparent
+  );
+  background-size: 32px 32px;
+  animation: track-flow-tile 1.1s linear infinite;
+}
+
+.track-flow-rail {
+  background-image: linear-gradient(
+    -45deg,
+    color-mix(in srgb, var(--primary) 7%, transparent) 25%,
+    transparent 25%,
+    transparent 50%,
+    color-mix(in srgb, var(--primary) 7%, transparent) 50%,
+    color-mix(in srgb, var(--primary) 7%, transparent) 75%,
+    transparent 75%,
+    transparent
+  );
+  background-size: 32px 32px;
+  animation: track-flow-tile 2.4s linear infinite;
+}
+
+.track-head-pulse {
+  animation: track-head-pulse 1.6s ease-in-out infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

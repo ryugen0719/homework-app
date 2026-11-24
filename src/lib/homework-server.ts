@@ -1,6 +1,10 @@
 import { cert, getApps, initializeApp } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
 import crypto from 'node:crypto';
+import {
+  calculateRangePointsSummary,
+  calculateSavePointsBreakdown,
+} from './points';
 
 export type AppRole = 'teacher' | 'student';
 export type StudySession = {
@@ -464,110 +468,40 @@ export async function getStudentsForTeacher(teacherId = 'default-teacher'): Prom
 }
 
 /**
- * 計画書第4章に基づくポイント計算
- * - 1分1pt
- * - 1日合計10分以上の日は継続日
- * - 連続継続日数に応じて +1, +2, +3, +4, 5日目以降最大+5pt
- * - 週ポイントは対象週の時間pt + 対象週に獲得した継続ボーナス
+ * 共通ポイントモジュール（src/lib/points.ts）を用いた週次ポイント計算
+ * - 勉強時間 1分=1pt + 連続学習ボーナス + 集中達成ボーナス + 写真提出ボーナス + ライブ計測ボーナス
  */
 export function calculateWeeklyPoints(
   allHistory: Record<string, StudySession[]>,
   targetWeekStart: string,
 ) {
-  // 全履歴の日付を昇順ソート
-  const sortedDates = Object.keys(allHistory)
-    .filter((d) => validDate(d))
-    .sort();
-
-  // 各日ごとの時間(分)・継続ボーナス・写真提出ボーナス
-  const dailyBonusMap: Record<string, number> = {};
-  const dailyPhotoBonusMap: Record<string, number> = {};
-  const dailyMinutesMap: Record<string, number> = {};
-
-  let currentStreak = 0;
-  let prevDate = '';
-
-  for (const date of sortedDates) {
-    const sessions = allHistory[date] || [];
-    const dayMinutes = sessions.reduce((sum, s) => sum + (s.minutes || 0), 0);
-    dailyMinutesMap[date] = dayMinutes;
-
-    // 写真提出ボーナス: その日に写真添付が1枚以上あれば +5pt/日
-    if (sessions.some((s) => Boolean(s.evidencePath))) {
-      dailyPhotoBonusMap[date] = 5;
-    }
-
-    if (dayMinutes >= 10) {
-      if (prevDate && offsetDateJst(prevDate, 1) === date) {
-        currentStreak += 1;
-      } else {
-        currentStreak = 1;
-      }
-      prevDate = date;
-      // 連続日数ボーナス（逆転要素）: +5, +10, +15, +20, 5日連続以降 最大+25pt/日
-      const bonus = Math.min(5, currentStreak) * 5;
-      dailyBonusMap[date] = bonus;
-    }
-  }
-
-  // 対象週の7日間
-  const weekDates: string[] = [];
-  for (let i = 0; i < 7; i++) {
-    weekDates.push(offsetDateJst(targetWeekStart, i));
-  }
-
-  let weekMinutes = 0;
-  let weekStreakBonus = 0;
-  let weekPhotoBonus = 0;
-
-  for (const date of weekDates) {
-    weekMinutes += dailyMinutesMap[date] || 0;
-    weekStreakBonus += dailyBonusMap[date] || 0;
-    weekPhotoBonus += dailyPhotoBonusMap[date] || 0;
-  }
-
-  const weekPoints = weekMinutes + weekStreakBonus + weekPhotoBonus;
-
-  return {
-    weekMinutes,
-    weekStreakBonus,
-    weekPhotoBonus,
-    weekPoints,
-    currentStreak,
-    dailyBonusMap,
-  };
+  const weekEnd = offsetDateJst(targetWeekStart, 6);
+  return calculateRangePointsSummary(allHistory, targetWeekStart, weekEnd);
 }
 
 /**
- * 記録保存前のポイント獲得予告
+ * 記録保存前のポイント＆ボーナス獲得予告
  */
 export function calculateSavePointsPreview(
   allHistory: Record<string, StudySession[]>,
   targetDate: string,
   newSessionMinutes: number,
+  isLiveSource = false,
 ) {
-  const currentSessions = allHistory[targetDate] || [];
-  const oldDayMinutes = currentSessions.reduce((sum, s) => sum + (s.minutes || 0), 0);
-  const newDayMinutes = oldDayMinutes + newSessionMinutes;
-
-  const timePoints = newSessionMinutes;
-
-  // もし旧合計が10分未満で、今回追加することで10分以上になる場合、新しく継続ボーナスが発生する
-  let streakBonus = 0;
-  if (oldDayMinutes < 10 && newDayMinutes >= 10) {
-    const yesterday = offsetDateJst(targetDate, -1);
-    let streak = 1;
-    let checkDate = yesterday;
-    while (allHistory[checkDate]?.reduce((sum, s) => sum + (s.minutes || 0), 0) >= 10) {
-      streak += 1;
-      checkDate = offsetDateJst(checkDate, -1);
-    }
-    streakBonus = Math.min(5, streak) * 5;
-  }
+  const breakdown = calculateSavePointsBreakdown({
+    allHistory,
+    targetDate,
+    newSessionMinutes,
+    isLiveSource,
+  });
 
   return {
-    timePoints,
-    streakBonus,
-    totalNewPoints: timePoints + streakBonus,
+    timePoints: breakdown.timePoints,
+    streakBonus: breakdown.streakBonus,
+    liveBonus: breakdown.liveBonus,
+    totalBonus: breakdown.totalBonus,
+    totalNewPoints: breakdown.totalPoints,
+    appliedMultiplier: breakdown.appliedMultiplier,
+    bonuses: breakdown.bonuses,
   };
 }

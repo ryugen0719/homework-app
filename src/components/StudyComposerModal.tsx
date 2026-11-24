@@ -7,12 +7,14 @@ import { AnimatePresence, motion } from 'motion/react';
 import confetti from 'canvas-confetti';
 import {
   Calendar,
+  Camera,
   Check,
   Clock,
+  Flame,
   LoaderCircle,
   Plus,
   Sparkles,
-  Trophy,
+  Timer,
   X,
 } from 'lucide-react';
 import HoldButton from './HoldButton/HoldButton';
@@ -21,6 +23,7 @@ import CountUp from './CountUp/CountUp';
 import { formatDuration } from '../lib/format-duration';
 import { ui } from '../app/ui';
 import { playAppSound } from './sounds';
+import type { BonusBreakdownItem, BonusType, SavePointsPreview } from '../lib/points';
 
 function subscribeMobile(callback: () => void) {
   if (typeof window === 'undefined') return () => {};
@@ -44,17 +47,53 @@ export interface StudyComposerDraft {
   minutes: string;
 }
 
-export interface StudyPointPreview {
-  timePoints: number;
-  streakBonus: number;
-  totalPoints: number;
-}
+export type StudyPointPreview = SavePointsPreview;
 
 interface CelebrationState {
   minutes: number;
+  timePoints: number;
   points: number;
-  streakBonus: number;
+  totalBonus: number;
+  appliedMultiplier: number;
+  ignitionHint?: string;
+  bonuses: BonusBreakdownItem[];
   newDayTotalMinutes: number;
+}
+
+const BONUS_VISUAL: Record<
+  BonusType,
+  {
+    bg: string;
+    border: string;
+    badge: string;
+    iconColor: string;
+  }
+> = {
+  streak: {
+    bg: 'bg-amber-500/10',
+    border: 'border-amber-500/30',
+    badge: 'bg-amber-500/20 text-amber-800 dark:text-amber-200',
+    iconColor: 'text-amber-600 dark:text-amber-400',
+  },
+  photo: {
+    bg: 'bg-reward-soft/70',
+    border: 'border-reward/30',
+    badge: 'bg-reward/18 text-reward-ink',
+    iconColor: 'text-reward',
+  },
+  live: {
+    bg: 'bg-emerald-500/10',
+    border: 'border-emerald-500/30',
+    badge: 'bg-emerald-500/20 text-emerald-800 dark:text-emerald-200',
+    iconColor: 'text-emerald-600 dark:text-emerald-400',
+  },
+};
+
+function BonusTypeIcon({ type, size = 14 }: { type: BonusType; size?: number }) {
+  const cls = `${BONUS_VISUAL[type].iconColor} shrink-0`;
+  if (type === 'streak') return <Flame size={size} className={cls} />;
+  if (type === 'photo') return <Camera size={size} className={cls} />;
+  return <Timer size={size} className={cls} />;
 }
 
 interface StudyComposerModalProps {
@@ -75,6 +114,7 @@ interface StudyComposerModalProps {
 }
 
 const AUTO_CLOSE_MS = 3400;
+const BONUS_AUTO_CLOSE_MS = 5000;
 
 export default function StudyComposerModal({
   open,
@@ -119,15 +159,18 @@ export default function StudyComposerModal({
     return () => window.cancelAnimationFrame(id);
   }, [open, isMobile, celebration]);
 
-  // 完了リビール表示後の自動クローズタイマー
+  // 完了リビール表示後の自動クローズタイマー（ボーナス獲得時は内訳を読めるよう少し長めに表示）
+  const autoCloseDurationMs =
+    celebration && celebration.bonuses.length > 0 ? BONUS_AUTO_CLOSE_MS : AUTO_CLOSE_MS;
+
   useEffect(() => {
     if (!celebration || !open) return;
     const timer = window.setTimeout(() => {
       setCelebration(null);
       onOpenChange(false);
-    }, AUTO_CLOSE_MS);
+    }, autoCloseDurationMs);
     return () => window.clearTimeout(timer);
-  }, [celebration, open, onOpenChange]);
+  }, [celebration, open, onOpenChange, autoCloseDurationMs]);
 
   const handleClose = () => {
     if (saving) return;
@@ -149,8 +192,12 @@ export default function StudyComposerModal({
   const handleSave = () => {
     const wasEditing = isEditing;
     const snapshotMinutes = parsedMinutes;
+    const snapshotTimePoints = pointPreview?.timePoints ?? 0;
     const snapshotPoints = pointPreview?.totalPoints ?? 0;
-    const snapshotStreakBonus = pointPreview?.streakBonus ?? 0;
+    const snapshotTotalBonus = pointPreview?.totalBonus ?? 0;
+    const snapshotAppliedMultiplier = pointPreview?.appliedMultiplier ?? 1.0;
+    const snapshotIgnitionHint = pointPreview?.ignitionHint;
+    const snapshotBonuses = pointPreview?.bonuses ?? [];
     const snapshotDayTotal = dayTotalMinutes + snapshotMinutes;
 
     void onSave().then((ok) => {
@@ -161,14 +208,18 @@ export default function StudyComposerModal({
         return;
       }
 
-      // 連続ボーナス獲得時はトレジャー音、通常記録時はストリーク音を再生
-      playAppSound(snapshotStreakBonus > 0 ? 'treasure' : 'streak');
+      // ボーナス獲得時はトレジャー音、通常記録時はストリーク音を再生
+      playAppSound(snapshotTotalBonus > 0 ? 'treasure' : 'streak');
 
-      // 新規記録時: モーダル内完了リビール＋控えめな紙吹雪
+      // 新規記録時: モーダル内完了リビール＋紙吹雪（ボーナス時はゴールド含む2段バースト）
       setCelebration({
         minutes: snapshotMinutes,
+        timePoints: snapshotTimePoints,
         points: snapshotPoints,
-        streakBonus: snapshotStreakBonus,
+        totalBonus: snapshotTotalBonus,
+        appliedMultiplier: snapshotAppliedMultiplier,
+        ignitionHint: snapshotIgnitionHint,
+        bonuses: snapshotBonuses,
         newDayTotalMinutes: snapshotDayTotal,
       });
 
@@ -176,16 +227,31 @@ export default function StudyComposerModal({
         typeof window !== 'undefined' &&
         !window.matchMedia('(prefers-reduced-motion: reduce)').matches
       ) {
+        const hasBigBonus = snapshotTotalBonus >= 10 || snapshotBonuses.length >= 2;
         void confetti({
-          particleCount: 38,
-          spread: 58,
-          startVelocity: 28,
-          scalar: 0.9,
+          particleCount: hasBigBonus ? 52 : 36,
+          spread: hasBigBonus ? 70 : 56,
+          startVelocity: hasBigBonus ? 32 : 28,
+          scalar: 0.92,
           ticks: 160,
-          origin: { y: 0.58 },
-          colors: ['#0057FF', '#3B82F6', '#00A86B', '#34D399', '#F59E0B'],
+          origin: { y: 0.56 },
+          colors: ['#0057FF', '#3B82F6', '#00A86B', '#34D399', '#F59E0B', '#FBBF24'],
           disableForReducedMotion: true,
         });
+        if (snapshotTotalBonus > 0) {
+          window.setTimeout(() => {
+            void confetti({
+              particleCount: 28,
+              spread: 84,
+              startVelocity: 24,
+              scalar: 0.85,
+              ticks: 140,
+              origin: { y: 0.5 },
+              colors: ['#F59E0B', '#FBBF24', '#0057FF', '#34D399'],
+              disableForReducedMotion: true,
+            });
+          }, 220);
+        }
       }
     });
   };
@@ -256,7 +322,7 @@ export default function StudyComposerModal({
           className="mt-5 w-full rounded-2xl border border-line/80 bg-card-subtle/50 px-4 py-3.5"
         >
           {celebration.points > 0 && (
-            <div className="flex items-center justify-center gap-2">
+            <div className="flex flex-wrap items-center justify-center gap-2">
               <Sparkles size={16} className="text-primary" />
               <span className="text-2xl font-extrabold font-numbers tracking-tight text-primary-ink">
                 <CountUp
@@ -269,6 +335,17 @@ export default function StudyComposerModal({
                   trigger="load"
                 />
               </span>
+              {celebration.appliedMultiplier > 1 && (
+                <motion.span
+                  initial={{ scale: 0.7, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  transition={{ delay: 0.25, type: 'spring', stiffness: 420, damping: 20 }}
+                  className="inline-flex items-center gap-1 rounded-full bg-amber-500/20 border border-amber-500/35 px-2.5 py-0.5 text-xs font-extrabold text-amber-800 dark:text-amber-200 font-numbers"
+                >
+                  <Flame size={12} className="text-amber-600 dark:text-amber-300" />
+                  ×{celebration.appliedMultiplier.toFixed(1)} BOOST
+                </motion.span>
+              )}
             </div>
           )}
 
@@ -286,10 +363,64 @@ export default function StudyComposerModal({
             )}
           </div>
 
-          {celebration.streakBonus > 0 && (
-            <div className="mt-2.5 inline-flex items-center gap-1 rounded-full bg-amber-500/15 border border-amber-500/30 px-2.5 py-0.5 text-[11px] font-bold text-amber-800 dark:text-amber-300 font-numbers">
-              <Trophy size={11} />
-              <span>連続ボーナス +{celebration.streakBonus}pt 獲得</span>
+          {/* 初日（10分到達・×1.0）のブースト点火演出 */}
+          {celebration.ignitionHint && (
+            <motion.div
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.34, duration: 0.3 }}
+              className="mt-3 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-left flex items-center gap-2"
+            >
+              <Flame size={15} className="text-amber-600 dark:text-amber-400 shrink-0" />
+              <span className="text-[11px] font-bold text-amber-900 dark:text-amber-200 leading-snug">
+                {celebration.ignitionHint}
+              </span>
+            </motion.div>
+          )}
+
+          {/* 獲得ボーナスの理由別リビールカード */}
+          {celebration.bonuses.length > 0 && (
+            <div className="mt-3.5 pt-3 border-t border-line/60 space-y-2 text-left">
+              <div className="flex items-center justify-between text-[11px] font-bold text-muted">
+                <span>獲得ボーナス内訳</span>
+                <span className="font-numbers text-amber-700 dark:text-amber-300">
+                  時間 {celebration.timePoints}pt ＋ ボーナス +{celebration.totalBonus}pt
+                </span>
+              </div>
+              {celebration.bonuses.map((bonus, idx) => {
+                const style = BONUS_VISUAL[bonus.type];
+                return (
+                  <motion.div
+                    key={bonus.type}
+                    initial={{ opacity: 0, x: -10, scale: 0.96 }}
+                    animate={{ opacity: 1, x: 0, scale: 1 }}
+                    transition={{
+                      delay: 0.32 + idx * 0.14,
+                      duration: 0.32,
+                      ease: [0.16, 1, 0.3, 1],
+                    }}
+                    className={`rounded-xl border px-3 py-2 ${style.bg} ${style.border}`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <BonusTypeIcon type={bonus.type} size={14} />
+                        <span className="text-xs font-extrabold text-ink truncate">
+                          {bonus.label}
+                        </span>
+                      </div>
+                      <span
+                        className={`px-2 py-0.5 rounded-full text-[11px] font-extrabold font-numbers shrink-0 ${style.badge}`}
+                      >
+                        +{bonus.points}pt
+                      </span>
+                    </div>
+                    <p className="m-0 mt-0.5 text-[11px] font-medium text-muted leading-snug">
+                      {bonus.reason}
+                      {bonus.nextHint ? ` · ${bonus.nextHint}` : ''}
+                    </p>
+                  </motion.div>
+                );
+              })}
             </div>
           )}
         </motion.div>
@@ -300,7 +431,7 @@ export default function StudyComposerModal({
         <motion.div
           initial={{ scaleX: 1 }}
           animate={{ scaleX: 0 }}
-          transition={{ duration: AUTO_CLOSE_MS / 1000, ease: 'linear' }}
+          transition={{ duration: autoCloseDurationMs / 1000, ease: 'linear' }}
           style={{ transformOrigin: 'left' }}
           className="h-full w-full bg-primary/70"
         />
@@ -393,25 +524,43 @@ export default function StudyComposerModal({
           />
         </div>
 
-        {/* 保存前ポイント予告 */}
+        {/* 保存前ポイント＆ボーナス獲得予告 */}
         {pointPreview && (
-          <div className="px-3.5 py-2.5 rounded-xl bg-primary-soft/80 border border-primary/20 flex flex-wrap items-center justify-between gap-2 text-xs font-numbers">
-            <div className="flex items-center gap-3 text-muted font-semibold">
-              <span className="inline-flex items-center gap-1 text-ink">
-                <Clock size={13} className="text-primary" />
-                {pointPreview.timePoints}pt
-              </span>
-              {pointPreview.streakBonus > 0 && (
-                <span className="inline-flex items-center gap-1 text-amber-800 dark:text-amber-300 font-bold">
-                  <Trophy size={13} className="text-amber-700 dark:text-amber-400" />
-                  連続 +{pointPreview.streakBonus}pt
+          <div className="px-3.5 py-2.5 rounded-xl bg-primary-soft/80 border border-primary/20 space-y-2 text-xs font-numbers">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-muted font-semibold">
+                <span className="inline-flex items-center gap-1 text-ink">
+                  <Clock size={13} className="text-primary" />
+                  時間 {pointPreview.timePoints}pt
                 </span>
-              )}
+                {pointPreview.bonuses.map((bonus) => (
+                  <span
+                    key={bonus.type}
+                    className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md font-bold text-[11px] ${BONUS_VISUAL[bonus.type].badge}`}
+                    title={bonus.reason}
+                  >
+                    <BonusTypeIcon type={bonus.type} size={11} />
+                    <span>
+                      {bonus.label} +{bonus.points}pt
+                    </span>
+                  </span>
+                ))}
+              </div>
+              <span className="inline-flex items-center gap-1 text-sm font-extrabold text-primary-ink shrink-0">
+                <Sparkles size={13} />
+                +{pointPreview.totalPoints} pt
+              </span>
             </div>
-            <span className="inline-flex items-center gap-1 text-sm font-extrabold text-primary-ink">
-              <Sparkles size={13} />
-              +{pointPreview.totalPoints} pt
-            </span>
+            {pointPreview.bonuses.length > 0 ? (
+              <p className="m-0 text-[11px] font-medium text-muted font-sans">
+                {pointPreview.bonuses.map((b) => b.reason).join(' / ')}
+              </p>
+            ) : pointPreview.ignitionHint ? (
+              <p className="m-0 text-[11px] font-bold text-amber-800 dark:text-amber-300 font-sans inline-flex items-center gap-1">
+                <Flame size={12} className="shrink-0 text-amber-600 dark:text-amber-400" />
+                <span>{pointPreview.ignitionHint}</span>
+              </p>
+            ) : null}
           </div>
         )}
 
